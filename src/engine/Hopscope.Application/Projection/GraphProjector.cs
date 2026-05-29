@@ -23,9 +23,10 @@ public sealed class GraphProjector : IGraphProjector
         long edgeCount,
         long sequence)
     {
+        var sourceKind = ResolveSourceKind(evt);
         var sourceNode = new GraphNode(
             Id:         evt.Source,
-            Kind:       NodeKind.Service,
+            Kind:       sourceKind,
             Label:      evt.Source,
             BrokerType: evt.BrokerType);
 
@@ -47,6 +48,29 @@ public sealed class GraphProjector : IGraphProjector
             UpsertNodes: new[] { sourceNode, destNode },
             UpsertEdges: new[] { edge },
             Sequence:    sequence);
+    }
+
+    // -----------------------------------------------------------------------
+    // Source-kind resolution
+    // Priority: explicit PayloadMetadata["sourceKind"] > default (Service).
+    // Preserves existing FakeIngestor behaviour: no sourceKind key → Service.
+    // Hand-written switch — no Enum.Parse reflection, AOT-safe.
+    // -----------------------------------------------------------------------
+    private static NodeKind ResolveSourceKind(EventEnvelope evt)
+    {
+        if (evt.PayloadMetadata.TryGetValue("sourceKind", out var raw))
+        {
+            switch (raw)
+            {
+                case "Service":  return NodeKind.Service;
+                case "Exchange": return NodeKind.Exchange;
+                case "Topic":    return NodeKind.Topic;
+                case "Queue":    return NodeKind.Queue;
+                // Unknown value: fall through to default below.
+            }
+        }
+
+        return NodeKind.Service;
     }
 
     // -----------------------------------------------------------------------

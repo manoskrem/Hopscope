@@ -36,8 +36,10 @@ jobs:
       - name: Assert image < 60 MB
         run: |
           BYTES=$(docker image inspect hopscope-engine:ci --format '{{.Size}}')
-          MB=$(( BYTES / 1024 / 1024 ))
-          echo "Engine image size: ${MB} MB"
+          # Decimal MB (bytes / 1e6) — matches `docker images` and the architecture's
+          # literal "< 60 MB" gate. (Binary MiB would let ~62.9 MB through.)
+          MB=$(( BYTES / 1000 / 1000 ))
+          echo "Engine image size: ${MB} MB (${BYTES} bytes, decimal MB)"
           if [ "$MB" -ge 60 ]; then
             echo "::error::Engine image ${MB} MB exceeds the 60 MB footprint gate"
             exit 1

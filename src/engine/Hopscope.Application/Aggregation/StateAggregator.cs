@@ -81,9 +81,12 @@ public sealed class StateAggregator : IStateAggregator
         if (!_seenHopIds.Add(evt.HopId))
             return new ValueTask<GraphDelta?>((GraphDelta?)null);
 
-        // --- Topology: upsert node for source (always Service) ---
+        // --- Topology: upsert node for source (kind data-driven via sourceKind metadata) ---
         if (!_nodes.ContainsKey(evt.Source))
-            _nodes[evt.Source] = new GraphNode(evt.Source, NodeKind.Service, evt.Source, evt.BrokerType);
+        {
+            var srcKind = ResolveSourceKind(evt);
+            _nodes[evt.Source] = new GraphNode(evt.Source, srcKind, evt.Source, evt.BrokerType);
+        }
 
         // --- Topology: upsert node for destination ---
         if (!_nodes.ContainsKey(evt.Destination))
@@ -241,6 +244,28 @@ public sealed class StateAggregator : IStateAggregator
         }
 
         return new HopNode(env, childNodes);
+    }
+
+    /// <summary>
+    /// Resolves the source <see cref="NodeKind"/> from the envelope.
+    /// Priority: explicit PayloadMetadata["sourceKind"] > default (Service).
+    /// Preserves FakeIngestor behaviour: no sourceKind key → Service.
+    /// Hand-written switch — no Enum.Parse, AOT-safe.
+    /// </summary>
+    private static NodeKind ResolveSourceKind(EventEnvelope evt)
+    {
+        if (evt.PayloadMetadata.TryGetValue("sourceKind", out var raw))
+        {
+            switch (raw)
+            {
+                case "Service":  return NodeKind.Service;
+                case "Exchange": return NodeKind.Exchange;
+                case "Topic":    return NodeKind.Topic;
+                case "Queue":    return NodeKind.Queue;
+            }
+        }
+
+        return NodeKind.Service;
     }
 
     /// <summary>
