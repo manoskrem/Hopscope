@@ -1,0 +1,35 @@
+# ---- .NET ----
+bin/
+obj/
+artifacts/
+*.user
+*.suo
+[Pp]ublish/
+*.binlog
+
+# ---- Node / UI ----
+node_modules/
+.next/
+dist/
+build/
+*.tsbuildinfo
+
+# ---- Go (agent) ----
+/src/agent/**/*.test
+/src/agent/bin/
+
+# ---- Generated protobuf (regenerated from contracts/proto) ----
+**/*.pb.go
+**/Generated/*.cs
+
+# ---- Env / secrets ----
+.env
+.env.*
+!.env.example
+
+# ---- OS / IDE ----
+.DS_Store
+.vs/
+.vscode/
+.idea/
+*.swp

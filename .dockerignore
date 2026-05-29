@@ -1,0 +1,22 @@
+# Keep local build artifacts out of the Docker context so `COPY . .` cannot clobber the
+# container's arch-specific restore (NETSDK1047) and so the context stays small.
+**/bin/
+**/obj/
+**/out/
+
+# VCS / tooling
+.git/
+.gitignore
+.vs/
+.vscode/
+.idea/
+
+# Frontend / agent (not part of the engine image)
+src/ui/node_modules/
+src/ui/dist/
+
+# Docs & misc
+*.md
+docs/
+deploy/
+pipelines/

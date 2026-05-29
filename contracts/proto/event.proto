@@ -1,0 +1,61 @@
+// Hopscope cross-language event contract — the SINGLE SOURCE OF TRUTH shared by the
+// C# engine (gRPC server) and the Go eBPF agent (gRPC client, Phase 5).
+//
+// Rules:
+//   * Additive-first. NEVER reuse a field number — it is the wire identity.
+//   * Change this file FIRST, then regenerate BOTH sides in the same change.
+//   * Keep congruent with Hopscope.Domain/Events/EventEnvelope.cs.
+//   * Nullability mapping (proto3 has no null):
+//       - parent_hop_id: empty string == null
+//       - error_details: unset message == null
+//   * payload_metadata is headers / routing keys / type-names ONLY — never message bodies.
+syntax = "proto3";
+
+package hopscope.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Deterministic codegen targets so both sides land in stable namespaces when bindings
+// are wired (C# via Grpc.Tools on build; Go via protoc — Phase 5, see contracts/README.md).
+option csharp_namespace = "Hopscope.Contracts.V1";
+option go_package = "github.com/hopscope/agent/internal/contracts/v1;contractsv1";
+
+// Per-hop lifecycle outcome. Ordinals MUST match Hopscope.Domain.Events.ExecutionStatus.
+enum ExecutionStatus {
+  SUCCESS = 0;
+  RETRYING = 1;
+  DEAD_LETTERED = 2;
+  FAILED = 3;
+}
+
+// Failure detail. Present iff the hop failed/dead-lettered. truncated_stack_trace is
+// bounded metadata, never a message body.
+message ErrorDetails {
+  string exception_type = 1;
+  string message = 2;
+  string truncated_stack_trace = 3;
+}
+
+// The normalized envelope EVERY ingestor (in-proc provider OR remote agent) emits.
+message EventEnvelope {
+  string trace_id = 1;                       // global correlation id
+  string hop_id = 2;                         // unique per message instance (dedupe key)
+  string parent_hop_id = 3;                  // upstream hop that caused this; empty == null
+  string source = 4;                         // originating component
+  string destination = 5;                    // exchange / topic / queue
+  string broker_type = 6;                    // "RabbitMQ" | "Kafka" | "Redis" | ...
+  map<string, string> payload_metadata = 7;  // headers / routing keys / type-names ONLY
+  google.protobuf.Timestamp timestamp = 8;   // UTC at interception
+  ExecutionStatus execution_status = 9;
+  ErrorDetails error_details = 10;           // unset == null
+}
+
+// Agent → Engine. Client-streaming for back-pressure-friendly high throughput.
+service Ingestion {
+  rpc Stream(stream EventEnvelope) returns (IngestAck);
+}
+
+message IngestAck {
+  uint64 accepted = 1;
+  uint64 deduped = 2;
+}

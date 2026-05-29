@@ -1,0 +1,12 @@
+# Code owners — auto-requested for review on matching paths.
+
+# Default owner for everything.
+*                         @manoskrem
+
+# The cross-language contract is the single source of truth shared by the engine and the
+# Go agent. Guard it to prevent silent drift.
+/contracts/               @manoskrem
+/contracts/proto/         @manoskrem
+
+# Footprint gate — changes here affect every build.
+/src/engine/Hopscope.Host/Dockerfile  @manoskrem
