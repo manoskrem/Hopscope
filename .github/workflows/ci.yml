@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Unit tests
+        run: dotnet test tests/Hopscope.Engine.Tests -c Release
+
+  aot-footprint:
+    name: aot-footprint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Builds the chiseled-AOT image, which runs the Native-AOT publish inside the
+      # SDK-AOT image (no clang/zlib setup needed on the runner). The publish uses
+      # TreatWarningsAsErrors (see Dockerfile), so ANY trim/AOT warning fails this job.
+      - name: Build engine image (AOT publish, warning-free gate)
+        run: docker build -f src/engine/Hopscope.Host/Dockerfile -t hopscope-engine:ci .
+      - name: Assert image < 60 MB
+        run: |
+          BYTES=$(docker image inspect hopscope-engine:ci --format '{{.Size}}')
+          MB=$(( BYTES / 1024 / 1024 ))
+          echo "Engine image size: ${MB} MB"
+          if [ "$MB" -ge 60 ]; then
+            echo "::error::Engine image ${MB} MB exceeds the 60 MB footprint gate"
+            exit 1
+          fi

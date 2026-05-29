@@ -19,7 +19,8 @@ RUN dotnet restore "src/engine/Hopscope.Host/Hopscope.Host.csproj" -a $TARGETARC
 # Copy the rest of the source and publish.
 COPY . .
 RUN dotnet publish "src/engine/Hopscope.Host/Hopscope.Host.csproj" \
-    -c Release -a $TARGETARCH --no-restore -o /app /p:PublishAot=true
+    -c Release -a $TARGETARCH --no-restore -o /app \
+    /p:PublishAot=true /p:TreatWarningsAsErrors=true
 
 # ---- runtime: native binary, no CoreCLR ----
 # .NET 10 folded the AOT-tuned runtime-deps into the standard chiseled image (the old
