@@ -4,6 +4,7 @@ using Hopscope.Application.Aggregation;
 using Hopscope.Application.Pipeline;
 using Hopscope.Application.Projection;
 using Hopscope.Infrastructure.Providers.Fake;
+using Hopscope.Infrastructure.Providers.RabbitMq;
 using Hopscope.Infrastructure.Serialization;
 using Hopscope.Push;
 
@@ -20,9 +21,53 @@ builder.Services.AddSingleton<IGraphProjector, GraphProjector>();
 builder.Services.AddSingleton<IStateAggregator, StateAggregator>();
 builder.Services.AddSingleton<IPushChannel, WebSocketPushChannel>();
 
-// Fake ingestor — registered as both IEventIngestor and the concrete type.
-// IEnumerable<IEventIngestor> in EngineLoop receives all registrations.
-builder.Services.AddSingleton<IEventIngestor, FakeIngestor>();
+// ── Broker providers (compile-time registered — AOT rule §3) ──────────────
+builder.Services.AddSingleton<IBrokerProvider, RabbitMqProvider>();
+
+// ── Ingestor wiring ────────────────────────────────────────────────────────
+// Read config MANUALLY — IConfiguration.Get<T>()/Bind() use reflection and
+// are NOT AOT-safe. Supported config keys (env var or appsettings):
+//   HOPSCOPE_RABBITMQ_URL  (env)  or  Hopscope:RabbitMq:Url  (appsettings)
+//   HOPSCOPE_RABBITMQ_VHOST                Hopscope:RabbitMq:Vhost
+//   HOPSCOPE_RABBITMQ_POLL_SECONDS         Hopscope:RabbitMq:PollSeconds
+//
+// When a RabbitMQ URL is present the RabbitMqProvider creates the ingestor and
+// FakeIngestor is NOT registered (real data only). With no URL configured the
+// FakeIngestor is the fallback so Phase-1 smoke-testing still works.
+
+var config    = builder.Configuration;
+var rmqUrl    = config["HOPSCOPE_RABBITMQ_URL"] ?? config["Hopscope:RabbitMq:Url"];
+var rmqVhost  = config["HOPSCOPE_RABBITMQ_VHOST"] ?? config["Hopscope:RabbitMq:Vhost"];
+var rmqPoll   = config["HOPSCOPE_RABBITMQ_POLL_SECONDS"] ?? config["Hopscope:RabbitMq:PollSeconds"];
+
+if (!string.IsNullOrWhiteSpace(rmqUrl))
+{
+    // Build the IngestionSource from manually-read config values.
+    var options = new Dictionary<string, string>(StringComparer.Ordinal);
+    if (!string.IsNullOrWhiteSpace(rmqVhost))
+        options["vhost"] = rmqVhost;
+    if (!string.IsNullOrWhiteSpace(rmqPoll))
+        options["pollSeconds"] = rmqPoll;
+
+    var rmqSource = new IngestionSource(
+        BrokerType:       "RabbitMQ",
+        ConnectionString: rmqUrl,
+        Options:          options);
+
+    // Register a factory delegate so DI resolves IBrokerProvider (and its
+    // ILoggerFactory dep) before constructing the ingestor. Compile-time,
+    // no reflection.
+    builder.Services.AddSingleton<IEventIngestor>(sp =>
+    {
+        var provider = sp.GetRequiredService<IBrokerProvider>();
+        return provider.CreateIngestor(rmqSource);
+    });
+}
+else
+{
+    // No real broker configured — fall back to the synthetic FakeIngestor.
+    builder.Services.AddSingleton<IEventIngestor, FakeIngestor>();
+}
 
 // ── Background pipeline ───────────────────────────────────────────────────
 builder.Services.AddHostedService<EngineLoop>();

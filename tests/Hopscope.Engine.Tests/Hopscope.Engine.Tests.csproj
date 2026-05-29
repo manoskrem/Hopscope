@@ -20,6 +20,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\engine\Hopscope.Application\Hopscope.Application.csproj" />
     <ProjectReference Include="..\..\src\engine\Hopscope.Domain\Hopscope.Domain.csproj" />
+    <ProjectReference Include="..\..\src\engine\Hopscope.Infrastructure\Hopscope.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

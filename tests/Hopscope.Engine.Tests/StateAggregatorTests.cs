@@ -312,6 +312,43 @@ public sealed class StateAggregatorTests
     }
 
     // -----------------------------------------------------------------------
+    // 14. sourceKind metadata honored: Exchange source node has Kind=Exchange
+    // -----------------------------------------------------------------------
+    [Fact]
+    public async Task SourceKindMetadata_Exchange_YieldsExchangeNode()
+    {
+        var agg = MakeAggregator();
+        var evt = MakeEnvelope(
+            "hop-1",
+            source: "orders.exchange",
+            metadata: new Dictionary<string, string> { ["sourceKind"] = "Exchange" });
+
+        var delta = await agg.IngestAsync(evt, CancellationToken.None);
+
+        Assert.NotNull(delta);
+        var src = delta!.UpsertNodes.Single(n => n.Id == "orders.exchange");
+        Assert.Equal(NodeKind.Exchange, src.Kind);
+    }
+
+    // -----------------------------------------------------------------------
+    // 15. No sourceKind metadata → source node defaults to Service (FakeIngestor
+    //     regression guard)
+    // -----------------------------------------------------------------------
+    [Fact]
+    public async Task NoSourceKindMetadata_SourceDefaultsToService()
+    {
+        var agg = MakeAggregator();
+        // Deliberately no sourceKind key — simulates FakeIngestor envelopes.
+        var evt = MakeEnvelope("hop-1", source: "fake-svc");
+
+        var delta = await agg.IngestAsync(evt, CancellationToken.None);
+
+        Assert.NotNull(delta);
+        var src = delta!.UpsertNodes.Single(n => n.Id == "fake-svc");
+        Assert.Equal(NodeKind.Service, src.Kind);
+    }
+
+    // -----------------------------------------------------------------------
     // 13. Windowed idempotency: re-ingesting an evicted HopId is treated as NEW
     //     (dedupe set is purged together with the evicted trace)
     // -----------------------------------------------------------------------
