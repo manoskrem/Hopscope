@@ -1,0 +1,36 @@
+# Local Hopscope sprint stack: the engine + a real RabbitMQ broker.
+#   docker compose -f deploy/docker-compose.yml up --build
+# Then publish/consume messages on RabbitMQ and watch the topology appear at
+#   http://localhost:8085/snapshot   (REST)   and   ws://localhost:8085/ws  (live)
+services:
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: hopscope-rabbitmq
+    # A non-"guest" user is NOT subject to RabbitMQ's loopback-only restriction,
+    # so the engine container can reach the Management API across the bridge net.
+    environment:
+      RABBITMQ_DEFAULT_USER: hopscope
+      RABBITMQ_DEFAULT_PASS: hopscope
+    ports:
+      - "5672:5672"     # AMQP
+      - "15672:15672"   # Management API + UI
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  engine:
+    build:
+      context: ..
+      dockerfile: src/engine/Hopscope.Host/Dockerfile
+    container_name: hopscope-engine
+    environment:
+      ASPNETCORE_URLS: "http://+:8080"
+      HOPSCOPE_RABBITMQ_URL: "http://hopscope:hopscope@rabbitmq:15672"
+      HOPSCOPE_RABBITMQ_POLL_SECONDS: "2"
+    ports:
+      - "8085:8080"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
