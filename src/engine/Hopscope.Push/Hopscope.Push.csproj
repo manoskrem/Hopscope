@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Hopscope.Application\Hopscope.Application.csproj" />
+    <ProjectReference Include="..\Hopscope.Infrastructure\Hopscope.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>
