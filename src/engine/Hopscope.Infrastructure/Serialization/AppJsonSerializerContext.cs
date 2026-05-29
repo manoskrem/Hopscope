@@ -10,10 +10,12 @@ namespace Hopscope.Infrastructure.Serialization;
 /// not compile time, so add new wire DTOs in the same edit that introduces them.
 /// Nested types (<see cref="GraphNode"/>, <see cref="GraphEdge"/>,
 /// <see cref="ErrorDetails"/>) are generated transitively via their containers.
+/// <see cref="PushFrame"/> is the WebSocket wire wrapper (snapshot OR delta per frame).
 /// Public (not internal per the §4d sketch) so the Host assembly can reference
 /// <c>AppJsonSerializerContext.Default</c> when wiring <c>ConfigureHttpJsonOptions</c>.
 /// </summary>
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+[JsonSerializable(typeof(PushFrame))]
 [JsonSerializable(typeof(GraphDelta))]
 [JsonSerializable(typeof(GraphSnapshot))]
 [JsonSerializable(typeof(EventEnvelope))]

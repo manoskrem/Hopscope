@@ -17,6 +17,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Hopscope.Push", "src\engine
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Hopscope.Host", "src\engine\Hopscope.Host\Hopscope.Host.csproj", "{467E1F4D-D474-4C47-8AFC-14D74B504753}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0AB3BF05-4346-4AA6-1389-037BE0695223}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Hopscope.Engine.Tests", "tests\Hopscope.Engine.Tests\Hopscope.Engine.Tests.csproj", "{2D76ABA8-8559-4E77-9F16-75FEAC83BD6F}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -87,6 +91,18 @@ Global
 		{467E1F4D-D474-4C47-8AFC-14D74B504753}.Release|x64.Build.0 = Release|Any CPU
 		{467E1F4D-D474-4C47-8AFC-14D74B504753}.Release|x86.ActiveCfg = Release|Any CPU
 		{467E1F4D-D474-4C47-8AFC-14D74B504753}.Release|x86.Build.0 = Release|Any CPU
+		{2D76ABA8-8559-4E77-9F16-75FEAC83BD6F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2D76ABA8-8559-4E77-9F16-75FEAC83BD6F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2D76ABA8-8559-4E77-9F16-75FEAC83BD6F}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{2D76ABA8-8559-4E77-9F16-75FEAC83BD6F}.Debug|x64.Build.0 = Debug|Any CPU
+		{2D76ABA8-8559-4E77-9F16-75FEAC83BD6F}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{2D76ABA8-8559-4E77-9F16-75FEAC83BD6F}.Debug|x86.Build.0 = Debug|Any CPU
+		{2D76ABA8-8559-4E77-9F16-75FEAC83BD6F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2D76ABA8-8559-4E77-9F16-75FEAC83BD6F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2D76ABA8-8559-4E77-9F16-75FEAC83BD6F}.Release|x64.ActiveCfg = Release|Any CPU
+		{2D76ABA8-8559-4E77-9F16-75FEAC83BD6F}.Release|x64.Build.0 = Release|Any CPU
+		{2D76ABA8-8559-4E77-9F16-75FEAC83BD6F}.Release|x86.ActiveCfg = Release|Any CPU
+		{2D76ABA8-8559-4E77-9F16-75FEAC83BD6F}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -98,5 +114,6 @@ Global
 		{64E8554A-B551-41FF-AA3D-DF8D1A578AC4} = {581C1AFC-A79E-7578-3E64-521365DC72E1}
 		{8B2EF947-3F50-4667-BA7A-5EEB6B44F9B1} = {581C1AFC-A79E-7578-3E64-521365DC72E1}
 		{467E1F4D-D474-4C47-8AFC-14D74B504753} = {581C1AFC-A79E-7578-3E64-521365DC72E1}
+		{2D76ABA8-8559-4E77-9F16-75FEAC83BD6F} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal
