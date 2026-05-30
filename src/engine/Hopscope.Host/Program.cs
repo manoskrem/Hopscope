@@ -4,6 +4,7 @@ using Hopscope.Application.Pipeline;
 using Hopscope.Application.Projection;
 using Hopscope.Infrastructure.Providers.Fake;
 using Hopscope.Infrastructure.Providers.RabbitMq;
+using Hopscope.Infrastructure.Providers.Redis;
 using Hopscope.Infrastructure.Serialization;
 using Hopscope.Push;
 
@@ -29,6 +30,7 @@ builder.Services.AddSingleton<IPushChannel, WebSocketPushChannel>();
 // drives synthetic traffic so Phase-1 smoke-testing still works (real data wins).
 var config = builder.Configuration;
 builder.Services.AddRabbitMqIngestion(config);
+builder.Services.AddRedisIngestion(config);
 builder.Services.AddFakeIngestionIfNoneRegistered();
 
 // ── Background pipeline ───────────────────────────────────────────────────
