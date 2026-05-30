@@ -1,7 +1,8 @@
-# Local Hopscope sprint stack: the engine + a real RabbitMQ broker.
+# Local Hopscope sprint stack: the engine + the React UI + a real RabbitMQ broker.
 #   docker compose -f deploy/docker-compose.yml up --build
-# Then publish/consume messages on RabbitMQ and watch the topology appear at
-#   http://localhost:8085/snapshot   (REST)   and   ws://localhost:8085/ws  (live)
+# Then open the live canvas at  http://localhost:8080  and publish/consume
+# messages on RabbitMQ to watch the topology build itself. The engine's raw
+# endpoints stay available at  http://localhost:8085/snapshot  and  ws://localhost:8085/ws .
 services:
   rabbitmq:
     image: rabbitmq:3-management-alpine
@@ -34,3 +35,15 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
+
+  ui:
+    build:
+      context: ..
+      dockerfile: src/ui/Dockerfile
+    container_name: hopscope-ui
+    # nginx serves the SPA and reverse-proxies /ws + /snapshot to engine:8080,
+    # so the browser stays same-origin and the engine needs no CORS.
+    ports:
+      - "8080:80"
+    depends_on:
+      - engine

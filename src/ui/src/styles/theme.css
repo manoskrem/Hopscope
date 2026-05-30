@@ -1,0 +1,102 @@
+/* Hopscope — "control-room / phosphor" design tokens.
+ *
+ * Dark, low-glare canvas for long monitoring sessions. Color is the primary
+ * status signal (pre-attentive), but status ALSO carries a distinct line
+ * treatment (see edge styles) so it is colorblind-safe and readable at zoom-out. */
+
+:root {
+  /* surfaces */
+  --bg: #070b0a;
+  --bg-grid: #0f1816;
+  --panel: #0b1110;
+  --panel-2: #0e1716;
+  --line: #16201d;
+  --line-2: #1d2a26;
+
+  /* type */
+  --text: #cfe9dd;
+  --dim: #7d958a;
+  --faint: #46584f;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, 'SF Mono', Menlo, monospace;
+  --font-display: 'Chakra Petch', var(--font-mono);
+
+  /* node-kind accents */
+  --kind-service: #37f08a;
+  --kind-exchange: #49c8ff;
+  --kind-topic: #b06bff;
+  --kind-queue: #ffb547;
+
+  /* execution-status palette + glow */
+  --ok: #37f08a;
+  --retry: #ffb547;
+  --dlq: #ff49d0;
+  --fail: #ff4d4d;
+  --glow-ok: rgba(55, 240, 138, 0.5);
+  --glow-retry: rgba(255, 181, 71, 0.5);
+  --glow-dlq: rgba(255, 73, 208, 0.6);
+  --glow-fail: rgba(255, 77, 77, 0.65);
+
+  /* misc */
+  --radius: 3px;
+  --shadow: 0 6px 20px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background-color: var(--bg);
+  background-image: radial-gradient(var(--bg-grid) 1px, transparent 1px);
+  background-size: 22px 22px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* faint scanline atmosphere, non-interactive */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(255, 255, 255, 0.012) 0 1px,
+    transparent 1px 3px
+  );
+  mix-blend-mode: overlay;
+  z-index: 9999;
+}
+
+a {
+  color: var(--kind-exchange);
+}
+
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--line-2);
+  border-radius: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+  }
+}
