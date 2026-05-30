@@ -21,6 +21,20 @@ services:
       timeout: 5s
       retries: 12
 
+  redis:
+    image: redis:7-alpine
+    container_name: hopscope-redis
+    # KEA = Keyspace + Events + All-commands → publishes __keyevent@<db>__:<event>
+    # notifications the engine's RedisIngestor PSUBSCRIBEs to.
+    command: ["redis-server", "--notify-keyspace-events", "KEA"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
   engine:
     build:
       context: ..
@@ -30,10 +44,15 @@ services:
       ASPNETCORE_URLS: "http://+:8080"
       HOPSCOPE_RABBITMQ_URL: "http://hopscope:hopscope@rabbitmq:15672"
       HOPSCOPE_RABBITMQ_POLL_SECONDS: "2"
+      # Redis tap — keyevent notifications normalize to Redis Topic nodes, co-rendering
+      # with RabbitMQ on the same canvas (the Phase-4 multi-broker seam proof).
+      HOPSCOPE_REDIS_URL: "redis://redis:6379"
     ports:
       - "8085:8080"
     depends_on:
       rabbitmq:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   ui:
