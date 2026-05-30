@@ -1,0 +1,77 @@
+name: Nightly broker E2E
+
+# Continuous real-broker integration coverage: stand up the full compose stack (engine + ui +
+# RabbitMQ + Redis + Kafka, OTLP enabled) and run the four real-broker E2E checks, so the
+# multi-broker co-render and the DeadLettered / Failed paths stay verified against real brokers.
+#
+# This is a SEPARATE workflow from ci.yml and is NOT a required status check — it never gates a
+# PR merge. It runs nightly on a schedule and on manual dispatch.
+on:
+  schedule:
+    - cron: '0 3 * * *'    # 03:00 UTC daily
+  workflow_dispatch: {}     # manual trigger from the Actions tab
+
+concurrency:
+  group: nightly-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  broker-e2e:
+    name: broker-e2e
+    runs-on: ubuntu-latest        # amd64 — the arm64 protoc workaround is irrelevant here
+    timeout-minutes: 30
+    env:
+      # Pin the compose project so the bridge network is `deploy_default` — the name the E2E
+      # scripts (and otlp-check.sh's in-network grpcurl) default to (HOPSCOPE_COMPOSE_NET).
+      COMPOSE_PROJECT_NAME: deploy
+      # Both compose files, base + Kafka overlay, so all four brokers come up (engine is built
+      # from Dockerfile.kafka). Colon-separated per Docker Compose's COMPOSE_FILE convention.
+      COMPOSE_FILE: deploy/docker-compose.yml:deploy/docker-compose.kafka.yml
+    steps:
+      - uses: actions/checkout@v4
+
+      # --wait blocks until the brokers' healthchecks pass. The engine/ui have no healthcheck,
+      # so --wait does NOT wait for them — the checks below self-wait on /healthz.
+      - name: Bring up the full stack (engine + ui + rabbitmq + redis + kafka)
+        run: docker compose up -d --build --wait --wait-timeout 300
+
+      - name: Wait for the engine control-plane (/healthz)
+        run: |
+          for _ in $(seq 1 60); do
+            if curl -fsS http://localhost:8085/healthz >/dev/null 2>&1; then
+              echo "engine ready"; exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::engine /healthz never came up"; exit 1
+
+      # Run all four checks (do NOT fail-fast) so one red doesn't hide the others, then fail
+      # the job if any failed. jq is preinstalled on ubuntu-latest; otlp-check.sh pulls the
+      # grpcurl image and crafts a deterministic OTLP error trace (no telemetrygen dependency).
+      - name: Run broker E2E checks (dlq, redis, kafka, otlp)
+        run: |
+          set -u
+          fails=()
+          for c in dlq redis kafka otlp; do
+            echo "::group::${c}-check"
+            if bash "deploy/e2e/${c}-check.sh"; then
+              echo "✓ ${c}-check passed"
+            else
+              echo "::error::${c}-check FAILED"
+              fails+=("$c")
+            fi
+            echo "::endgroup::"
+          done
+          if [ "${#fails[@]}" -ne 0 ]; then
+            echo "::error::failed checks: ${fails[*]}"
+            exit 1
+          fi
+          echo "all four broker E2E checks passed"
+
+      - name: Engine logs on failure
+        if: failure()
+        run: docker compose logs --no-color engine || true
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v || true
