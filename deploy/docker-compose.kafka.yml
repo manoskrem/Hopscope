@@ -1,0 +1,45 @@
+# Kafka opt-in overlay for the Hopscope sprint stack. Merge it ON TOP of the base compose:
+#
+#   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.kafka.yml up --build
+#
+# This adds a single-node KRaft Kafka broker, rebuilds the engine from Dockerfile.kafka
+# (-p:EnableKafka=true → Confluent.Kafka + Providers/Kafka compiled in), and points the
+# engine at the broker so Kafka topics co-render with RabbitMQ + Redis on one canvas.
+# The base compose stays Kafka-free so the DEFAULT engine image remains tiny/chiseled.
+services:
+  kafka:
+    image: apache/kafka:3.8.0
+    container_name: hopscope-kafka
+    ports:
+      - "9092:9092"
+    environment:
+      # Single-node KRaft (no ZooKeeper). The combined broker+controller listens on
+      # PLAINTEXT (in-network, advertised as kafka:9092) + CONTROLLER + a host PLAINTEXT_HOST.
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      KAFKA_LISTENERS: "PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,PLAINTEXT_HOST://0.0.0.0:29092"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 24
+
+  engine:
+    build:
+      # Override the base engine build to the Kafka-enabled variant image.
+      context: ..
+      dockerfile: src/engine/Hopscope.Host/Dockerfile.kafka
+    environment:
+      # Inherits RabbitMQ + Redis env from the base file; add the Kafka tap.
+      HOPSCOPE_KAFKA_URL: "kafka:9092"
+    depends_on:
+      kafka:
+        condition: service_healthy

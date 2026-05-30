@@ -27,6 +27,9 @@ RUN dotnet publish "src/engine/Hopscope.Host/Hopscope.Host.csproj" \
 # `-chiseled-aot` runtime tag was retired); InvariantGlobalization=true drops ICU/tzdata.
 FROM mcr.microsoft.com/dotnet/runtime-deps:10.0-noble-chiseled AS final
 WORKDIR /app
+# Default build is Kafka-free → the single self-contained Native-AOT binary is all that
+# ships (no native libraries to carry). The Kafka opt-in variant has its own Dockerfile.kafka
+# which copies the whole publish dir (to carry native librdkafka) onto a non-chiseled base.
 COPY --from=build /app/Hopscope.Host ./Hopscope.Host
 USER $APP_UID
 ENTRYPOINT ["./Hopscope.Host"]

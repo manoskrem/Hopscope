@@ -6,6 +6,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- Tests run under the JIT — NOT AOT. No PublishAot here. -->
     <IsPackable>false</IsPackable>
+
+    <!-- Kafka opt-in variant: -p:EnableKafka=true builds the referenced Infrastructure
+         WITH Confluent.Kafka and defines KAFKA so the KafkaProvider tests compile/run.
+         Default (off): the pure KafkaMapper tests still run; the provider tests are #if'd out. -->
+    <EnableKafka Condition="'$(EnableKafka)' == ''">false</EnableKafka>
+    <DefineConstants Condition="'$(EnableKafka)' == 'true'">$(DefineConstants);KAFKA</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>

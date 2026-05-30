@@ -5,14 +5,39 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <IsAotCompatible>true</IsAotCompatible>
+
+    <!-- Kafka is an OPT-IN build variant. Confluent.Kafka is not trim-clean (its publish
+         emits the aggregate IL2104 trim warning), so it is EXCLUDED from the default
+         Native-AOT build to keep the publish warning-free and the image tiny/chiseled.
+         Build with -p:EnableKafka=true to include it (see Dockerfile.kafka and
+         deploy/docker-compose.kafka.yml). The KAFKA constant gates the Confluent-using
+         glue; KafkaMapper.cs is pure (no Confluent dependency) and is always compiled so
+         its unit tests run in the default CI test job. -->
+    <EnableKafka Condition="'$(EnableKafka)' == ''">false</EnableKafka>
+    <DefineConstants Condition="'$(EnableKafka)' == 'true'">$(DefineConstants);KAFKA</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Hopscope.Application\Hopscope.Application.csproj" />
   </ItemGroup>
 
+  <!-- Confluent.Kafka P/Invokes native librdkafka (P/Invoke is AOT-fine), but the managed
+       wrapper produces trim warnings → referenced ONLY in the Kafka variant. -->
+  <ItemGroup Condition="'$(EnableKafka)' == 'true'">
+    <PackageReference Include="Confluent.Kafka" Version="2.6.1" />
+  </ItemGroup>
+
+  <!-- The Confluent-dependent glue compiles only in the Kafka variant. KafkaMapper.cs is
+       pure and stays compiled in every build (dead-code-trimmed out of the default native
+       image since nothing references it) so its deterministic tests run in default CI. -->
+  <ItemGroup Condition="'$(EnableKafka)' != 'true'">
+    <Compile Remove="Providers/Kafka/KafkaIngestor.cs" />
+    <Compile Remove="Providers/Kafka/KafkaProvider.cs" />
+    <Compile Remove="Providers/Kafka/KafkaServiceCollectionExtensions.cs" />
+  </ItemGroup>
+
   <ItemGroup>
-    <!-- Expose internals (RabbitMqMapper, DTOs) to the test project only. -->
+    <!-- Expose internals (mappers, DTOs) to the test project only. -->
     <InternalsVisibleTo Include="Hopscope.Engine.Tests" />
   </ItemGroup>
 

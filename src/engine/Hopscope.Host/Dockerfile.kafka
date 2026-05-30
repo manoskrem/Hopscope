@@ -1,0 +1,47 @@
+# syntax=docker/dockerfile:1
+# Build context: repo root
+#
+# Kafka OPT-IN variant image. Confluent.Kafka is not trim-clean (IL2104) and P/Invokes
+# native librdkafka (+ libssl/libsasl/libz), so the Kafka build is kept OUT of the default
+# tiny/chiseled image (see Dockerfile) and shipped here instead:
+#   * publishes with -p:EnableKafka=true  → compiles Providers/Kafka + references Confluent.Kafka
+#   * NoWarn IL2104 is scoped to the Kafka build in Hopscope.Host.csproj (gate stays honest)
+#   * copies the WHOLE publish dir so native librdkafka.so travels with the binary
+#   * runs on the NON-chiseled runtime-deps base, which carries the shared libraries
+#     (libssl/libsasl2/libz) that librdkafka dlopen()s at load time — the chiseled base lacks them
+#
+# Build:   docker build -f src/engine/Hopscope.Host/Dockerfile.kafka -t hopscope-engine:kafka .
+# Or via:  docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.kafka.yml up --build
+
+# ---- build ----
+FROM mcr.microsoft.com/dotnet/sdk:10.0-noble-aot AS build
+ARG TARGETARCH
+WORKDIR /src
+
+# Copy solution + all .csproj files first so this layer is cached on source-only changes.
+COPY ["Hopscope.sln", "./"]
+COPY ["src/engine/Hopscope.Domain/Hopscope.Domain.csproj",           "src/engine/Hopscope.Domain/"]
+COPY ["src/engine/Hopscope.Application/Hopscope.Application.csproj", "src/engine/Hopscope.Application/"]
+COPY ["src/engine/Hopscope.Infrastructure/Hopscope.Infrastructure.csproj", "src/engine/Hopscope.Infrastructure/"]
+COPY ["src/engine/Hopscope.Push/Hopscope.Push.csproj",               "src/engine/Hopscope.Push/"]
+COPY ["src/engine/Hopscope.Host/Hopscope.Host.csproj",               "src/engine/Hopscope.Host/"]
+
+RUN dotnet restore "src/engine/Hopscope.Host/Hopscope.Host.csproj" -a $TARGETARCH /p:EnableKafka=true
+
+# Copy the rest of the source and publish with Kafka enabled.
+COPY . .
+RUN dotnet publish "src/engine/Hopscope.Host/Hopscope.Host.csproj" \
+    -c Release -a $TARGETARCH --no-restore -o /app \
+    /p:PublishAot=true /p:TreatWarningsAsErrors=true /p:EnableKafka=true
+
+# ---- runtime: NON-chiseled (carries libssl/libsasl/libz that librdkafka needs) ----
+FROM mcr.microsoft.com/dotnet/runtime-deps:10.0-noble AS final
+WORKDIR /app
+# Whole publish dir so the native librdkafka shared library ships next to the binary.
+COPY --from=build /app/ ./
+# librdkafka needs SASL at load time on some images; libssl/libz are present in runtime-deps.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libsasl2-2 \
+    && rm -rf /var/lib/apt/lists/*
+USER $APP_UID
+ENTRYPOINT ["./Hopscope.Host"]
