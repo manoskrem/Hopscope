@@ -299,6 +299,37 @@ public sealed class OtlpMapperTests
     }
 
     // =========================================================================
+    // Span-kind filter (C1) — only real hops render; INTERNAL/UNSPECIFIED dropped
+    // =========================================================================
+
+    [Theory]
+    [InlineData(2)]   // SERVER   — service-call edge (incoming RPC)
+    [InlineData(3)]   // CLIENT   — service-call edge (outgoing RPC)
+    [InlineData(4)]   // PRODUCER — messaging hop
+    [InlineData(5)]   // CONSUMER — messaging hop
+    public void IsHopSpanKind_BoundarySpanKinds_AreKept(int spanKind)
+    {
+        Assert.True(OtlpMapper.IsHopSpanKind(spanKind));
+    }
+
+    [Theory]
+    [InlineData(0)]   // UNSPECIFIED — no declared role (spec: MAY treat as INTERNAL)
+    [InlineData(1)]   // INTERNAL    — in-process work, not a hop
+    public void IsHopSpanKind_InternalOrUnspecified_AreDropped(int spanKind)
+    {
+        Assert.False(OtlpMapper.IsHopSpanKind(spanKind));
+    }
+
+    [Theory]
+    [InlineData(6)]    // above the defined range
+    [InlineData(99)]
+    [InlineData(-1)]   // (int)SpanKind can never be negative, but lock the contract
+    public void IsHopSpanKind_OutOfRange_AreDropped(int spanKind)
+    {
+        Assert.False(OtlpMapper.IsHopSpanKind(spanKind));
+    }
+
+    // =========================================================================
     // Hex helpers
     // =========================================================================
 

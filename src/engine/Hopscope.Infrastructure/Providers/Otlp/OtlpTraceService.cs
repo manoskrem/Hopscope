@@ -60,6 +60,14 @@ public sealed class OtlpTraceService : TraceService.TraceServiceBase
             {
                 foreach (var span in scopeSpans.Spans)
                 {
+                    // Span-kind filter: only SERVER/CLIENT/PRODUCER/CONSUMER are real hops.
+                    // Drop INTERNAL/UNSPECIFIED BEFORE mapping so they never reach the bounded
+                    // bridge or the trace-retention window — INTERNAL spans are usually the bulk
+                    // of a trace and would flood the canvas with non-edge nodes. Silent by design
+                    // (high volume); the invalid-id drop below stays a Warning.
+                    if (!OtlpMapper.IsHopSpanKind((int)span.Kind))
+                        continue;
+
                     try
                     {
                         var envelope = MapSpan(span, resourceServiceName);

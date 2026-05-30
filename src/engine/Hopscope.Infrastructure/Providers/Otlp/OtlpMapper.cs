@@ -32,6 +32,25 @@ internal static class OtlpMapper
     private const int TraceIdBytes = 16;
     private const int SpanIdBytes  = 8;
 
+    // ── Span-kind filter ──────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Whether a span of the given OTLP <c>SpanKind</c> represents a real hop/edge worth
+    /// rendering on the canvas. The caller drops everything else BEFORE building an envelope
+    /// so non-hop spans never reach the bounded bridge or the trace-retention window.
+    ///
+    /// trace.proto SpanKind values:
+    ///   0 UNSPECIFIED, 1 INTERNAL, 2 SERVER, 3 CLIENT, 4 PRODUCER, 5 CONSUMER.
+    ///
+    /// Kept = SERVER/CLIENT (service-call edges) + PRODUCER/CONSUMER (messaging hops) — the
+    /// four application-boundary kinds, each of which describes traffic crossing between two
+    /// parties. Dropped = INTERNAL (in-process work — no hop) and UNSPECIFIED (no declared
+    /// role; the spec says it MAY be treated as INTERNAL). Without this filter, INTERNAL spans
+    /// — typically the bulk of a trace — flood the canvas with non-edge nodes and burn the
+    /// &lt;35 MB RAM budget.
+    /// </summary>
+    internal static bool IsHopSpanKind(int spanKind) => spanKind is 2 or 3 or 4 or 5;
+
     // ── Public entry point ────────────────────────────────────────────────────
 
     /// <summary>
