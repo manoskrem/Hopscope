@@ -5,6 +5,9 @@ using Hopscope.Application.Projection;
 using Hopscope.Infrastructure.Providers.Fake;
 using Hopscope.Infrastructure.Providers.RabbitMq;
 using Hopscope.Infrastructure.Providers.Redis;
+#if KAFKA
+using Hopscope.Infrastructure.Providers.Kafka;
+#endif
 using Hopscope.Infrastructure.Serialization;
 using Hopscope.Push;
 
@@ -31,6 +34,11 @@ builder.Services.AddSingleton<IPushChannel, WebSocketPushChannel>();
 var config = builder.Configuration;
 builder.Services.AddRabbitMqIngestion(config);
 builder.Services.AddRedisIngestion(config);
+#if KAFKA
+// Kafka is an opt-in build variant (Confluent.Kafka is not trim-clean). This line is
+// compiled in only when built with -p:EnableKafka=true (Dockerfile.kafka).
+builder.Services.AddKafkaIngestion(config);
+#endif
 builder.Services.AddFakeIngestionIfNoneRegistered();
 
 // ── Background pipeline ───────────────────────────────────────────────────

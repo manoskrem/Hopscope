@@ -6,11 +6,28 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <PublishAot>true</PublishAot>
     <InvariantGlobalization>true</InvariantGlobalization>
+
+    <!-- Kafka opt-in variant (see Hopscope.Infrastructure.csproj). Default: off → the AOT
+         publish is warning-free and the image stays chiseled/tiny. -p:EnableKafka=true
+         pulls in Confluent.Kafka and the Providers/Kafka glue. -->
+    <EnableKafka Condition="'$(EnableKafka)' == ''">false</EnableKafka>
+    <DefineConstants Condition="'$(EnableKafka)' == 'true'">$(DefineConstants);KAFKA</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Hopscope.Infrastructure\Hopscope.Infrastructure.csproj" />
     <ProjectReference Include="..\Hopscope.Push\Hopscope.Push.csproj" />
   </ItemGroup>
+
+  <!-- Kafka variant only: root the wrapper whole and suppress its aggregate trim warning.
+       Confluent.Kafka is not trim-clean; IL2104 is suppressed ONLY here so the DEFAULT
+       image keeps the "zero trim warnings" gate honest. The variant's real-broker E2E
+       (deploy/e2e/kafka-check.sh) is the runtime proof that nothing load-bearing was trimmed. -->
+  <ItemGroup Condition="'$(EnableKafka)' == 'true'">
+    <TrimmerRootAssembly Include="Confluent.Kafka" />
+  </ItemGroup>
+  <PropertyGroup Condition="'$(EnableKafka)' == 'true'">
+    <NoWarn>$(NoWarn);IL2104</NoWarn>
+  </PropertyGroup>
 
 </Project>
