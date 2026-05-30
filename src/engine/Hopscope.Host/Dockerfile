@@ -6,6 +6,18 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0-noble-aot AS build
 ARG TARGETARCH
 WORKDIR /src
 
+# arm64-only: Grpc.Tools' bundled linux_arm64 protoc SIGSEGVs (exit 139 → MSB6006) when
+# MSBuild's ProtoCompile task spawns it under Docker Desktop on Apple Silicon — the same
+# binary runs fine standalone, so it's the MSBuild spawn that trips this specific build.
+# The system protoc does not crash, so we install it and point Grpc.Tools at it below via
+# Protobuf_ProtocFullPath (the bundled grpc_csharp_plugin still does the --grpc_out codegen).
+# amd64 is untouched (its bundled protoc works), so the CI image build is byte-for-byte the same.
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+        apt-get update \
+        && apt-get install -y --no-install-recommends protobuf-compiler \
+        && rm -rf /var/lib/apt/lists/*; \
+    fi
+
 # Copy solution + all .csproj files first so this layer is cached on source-only changes.
 COPY ["Hopscope.sln", "./"]
 COPY ["src/engine/Hopscope.Domain/Hopscope.Domain.csproj",           "src/engine/Hopscope.Domain/"]
@@ -17,10 +29,13 @@ COPY ["src/engine/Hopscope.Host/Hopscope.Host.csproj",               "src/engine
 RUN dotnet restore "src/engine/Hopscope.Host/Hopscope.Host.csproj" -a $TARGETARCH
 
 # Copy the rest of the source and publish.
+# On arm64 override protoc with the system one (installed above); amd64 uses the bundled protoc.
 COPY . .
-RUN dotnet publish "src/engine/Hopscope.Host/Hopscope.Host.csproj" \
+RUN PROTOC_OVERRIDE=""; \
+    if [ "$TARGETARCH" = "arm64" ]; then PROTOC_OVERRIDE="/p:Protobuf_ProtocFullPath=/usr/bin/protoc"; fi; \
+    dotnet publish "src/engine/Hopscope.Host/Hopscope.Host.csproj" \
     -c Release -a $TARGETARCH --no-restore -o /app \
-    /p:PublishAot=true /p:TreatWarningsAsErrors=true
+    /p:PublishAot=true /p:TreatWarningsAsErrors=true $PROTOC_OVERRIDE
 
 # ---- runtime: native binary, no CoreCLR ----
 # .NET 10 folded the AOT-tuned runtime-deps into the standard chiseled image (the old

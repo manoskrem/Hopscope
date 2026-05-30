@@ -47,8 +47,14 @@ services:
       # Redis tap — keyevent notifications normalize to Redis Topic nodes, co-rendering
       # with RabbitMQ on the same canvas (the Phase-4 multi-broker seam proof).
       HOPSCOPE_REDIS_URL: "redis://redis:6379"
+      # OTLP gRPC trace receiver on :4317 — span→hop with real per-trace Failed + ErrorDetails,
+      # co-rendering with RabbitMQ + Redis (+ Kafka via the overlay) on one canvas. The
+      # in-proc receiver re-binds both the :8080 HTTP/1.1 and :4317 HTTP/2 listeners explicitly
+      # (see Program.cs) so the WS/REST control-plane stays up alongside gRPC.
+      HOPSCOPE_OTLP_ENABLED: "true"
     ports:
       - "8085:8080"
+      - "4317:4317"   # OTLP gRPC (h2c) — for OTLP exporters running on the host
     depends_on:
       rabbitmq:
         condition: service_healthy

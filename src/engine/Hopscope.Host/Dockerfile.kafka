@@ -18,6 +18,16 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0-noble-aot AS build
 ARG TARGETARCH
 WORKDIR /src
 
+# arm64-only: install the system protoc so MSBuild's ProtoCompile uses it instead of the
+# bundled Grpc.Tools arm64 protoc, which SIGSEGVs (exit 139) when spawned by MSBuild under
+# Docker Desktop on Apple Silicon. See the default Dockerfile for the full rationale. amd64
+# is untouched.
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+        apt-get update \
+        && apt-get install -y --no-install-recommends protobuf-compiler \
+        && rm -rf /var/lib/apt/lists/*; \
+    fi
+
 # Copy solution + all .csproj files first so this layer is cached on source-only changes.
 COPY ["Hopscope.sln", "./"]
 COPY ["src/engine/Hopscope.Domain/Hopscope.Domain.csproj",           "src/engine/Hopscope.Domain/"]
@@ -29,10 +39,13 @@ COPY ["src/engine/Hopscope.Host/Hopscope.Host.csproj",               "src/engine
 RUN dotnet restore "src/engine/Hopscope.Host/Hopscope.Host.csproj" -a $TARGETARCH /p:EnableKafka=true
 
 # Copy the rest of the source and publish with Kafka enabled.
+# On arm64 override protoc with the system one (installed above); amd64 uses the bundled protoc.
 COPY . .
-RUN dotnet publish "src/engine/Hopscope.Host/Hopscope.Host.csproj" \
+RUN PROTOC_OVERRIDE=""; \
+    if [ "$TARGETARCH" = "arm64" ]; then PROTOC_OVERRIDE="/p:Protobuf_ProtocFullPath=/usr/bin/protoc"; fi; \
+    dotnet publish "src/engine/Hopscope.Host/Hopscope.Host.csproj" \
     -c Release -a $TARGETARCH --no-restore -o /app \
-    /p:PublishAot=true /p:TreatWarningsAsErrors=true /p:EnableKafka=true
+    /p:PublishAot=true /p:TreatWarningsAsErrors=true /p:EnableKafka=true $PROTOC_OVERRIDE
 
 # ---- runtime: NON-chiseled (carries libssl/libsasl/libz that librdkafka needs) ----
 FROM mcr.microsoft.com/dotnet/runtime-deps:10.0-noble AS final
