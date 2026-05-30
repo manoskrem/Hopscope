@@ -1,0 +1,14 @@
+Vendored OpenTelemetry protobuf definitions — v1.3.2 stable
+Source: https://github.com/open-telemetry/opentelemetry-proto (tag v1.3.2)
+
+Files included (exact upstream content, byte-faithful):
+  opentelemetry/proto/collector/trace/v1/trace_service.proto
+  opentelemetry/proto/trace/v1/trace.proto
+  opentelemetry/proto/common/v1/common.proto
+  opentelemetry/proto/resource/v1/resource.proto
+
+Import paths are preserved exactly as upstream so Grpc.Tools resolves them.
+ProtoRoot in the .csproj points at this directory.
+
+Do not hand-edit these files. If upgrading: replace with the new upstream content,
+re-run dotnet build to regenerate the C# bindings, and verify the AOT publish is clean.
