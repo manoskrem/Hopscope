@@ -35,7 +35,10 @@
 
   <!-- Grpc.Tools server-side code generation for the vendored OTLP protos.
        ProtoRoot matches the proto import paths so cross-file imports resolve correctly.
-       GrpcServices="Server" generates only the service base (we receive, never call out). -->
+       GrpcServices="Server" generates only the service base (we receive, never call out).
+       (On local arm64 Docker the build stage overrides protoc via Protobuf_ProtocFullPath —
+       see src/engine/Hopscope.Host/Dockerfile — because Grpc.Tools' bundled arm64 protoc
+       SIGSEGVs when MSBuild spawns it under Docker Desktop on Apple Silicon.) -->
   <ItemGroup>
     <Protobuf Include="Providers/Otlp/protos/**/*.proto"
               GrpcServices="Server"
