@@ -21,6 +21,27 @@
     <ProjectReference Include="..\Hopscope.Application\Hopscope.Application.csproj" />
   </ItemGroup>
 
+  <!-- OTLP gRPC receiver. Grpc.AspNetCore + Google.Protobuf are Native-AOT-safe when using
+       ONLY the generated parse/serialize paths (no Descriptor/reflection/JsonFormatter).
+       FrameworkReference exposes the ASP.NET gRPC service base type (TraceServiceBase)
+       to this classlib without pulling in the full web framework at runtime. -->
+  <ItemGroup>
+    <PackageReference Include="Grpc.AspNetCore" Version="2.71.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <!-- Grpc.Tools server-side code generation for the vendored OTLP protos.
+       ProtoRoot matches the proto import paths so cross-file imports resolve correctly.
+       GrpcServices="Server" generates only the service base (we receive, never call out). -->
+  <ItemGroup>
+    <Protobuf Include="Providers/Otlp/protos/**/*.proto"
+              GrpcServices="Server"
+              ProtoRoot="Providers/Otlp/protos" />
+  </ItemGroup>
+
   <!-- Confluent.Kafka P/Invokes native librdkafka (P/Invoke is AOT-fine), but the managed
        wrapper produces trim warnings → referenced ONLY in the Kafka variant. -->
   <ItemGroup Condition="'$(EnableKafka)' == 'true'">

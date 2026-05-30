@@ -31,5 +31,9 @@ WORKDIR /app
 # ships (no native libraries to carry). The Kafka opt-in variant has its own Dockerfile.kafka
 # which copies the whole publish dir (to carry native librdkafka) onto a non-chiseled base.
 COPY --from=build /app/Hopscope.Host ./Hopscope.Host
+# 8080 = HTTP/1.1 (WebSocket + REST control-plane)
+# 4317 = HTTP/2 h2c (OTLP gRPC receiver, enabled via HOPSCOPE_OTLP_ENABLED=true)
+EXPOSE 8080
+EXPOSE 4317
 USER $APP_UID
 ENTRYPOINT ["./Hopscope.Host"]

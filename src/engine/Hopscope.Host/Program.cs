@@ -3,6 +3,7 @@ using Hopscope.Application.Aggregation;
 using Hopscope.Application.Pipeline;
 using Hopscope.Application.Projection;
 using Hopscope.Infrastructure.Providers.Fake;
+using Hopscope.Infrastructure.Providers.Otlp;
 using Hopscope.Infrastructure.Providers.RabbitMq;
 using Hopscope.Infrastructure.Providers.Redis;
 #if KAFKA
@@ -10,6 +11,7 @@ using Hopscope.Infrastructure.Providers.Kafka;
 #endif
 using Hopscope.Infrastructure.Serialization;
 using Hopscope.Push;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
 
 var builder = WebApplication.CreateSlimBuilder(args);
 
@@ -39,6 +41,23 @@ builder.Services.AddRedisIngestion(config);
 // compiled in only when built with -p:EnableKafka=true (Dockerfile.kafka).
 builder.Services.AddKafkaIngestion(config);
 #endif
+
+// ── OTLP gRPC receiver (flagged gate exception — touches Program.cs in two places) ──
+// Grpc.AspNetCore + Google.Protobuf are AOT-safe (generated parse/serialize paths only).
+// When disabled: registers nothing; Fake fallback still works.
+var (otlpEnabled, otlpPort) = builder.Services.AddOtlpIngestion(config);
+if (otlpEnabled)
+{
+    // AddGrpc registers the gRPC framework middleware (Grpc.AspNetCore.Server).
+    builder.Services.AddGrpc();
+
+    // Kestrel: add an HTTP/2 (h2c, plain TCP) listener for gRPC on the OTLP port.
+    // ConfigureKestrel ADDS a listener — it does NOT replace the ASPNETCORE_URLS default
+    // (port 8080 for HTTP/1.1 WebSocket + REST). Both listeners are active.
+    builder.WebHost.ConfigureKestrel(o =>
+        o.ListenAnyIP(otlpPort, lo => lo.Protocols = HttpProtocols.Http2));
+}
+
 builder.Services.AddFakeIngestionIfNoneRegistered();
 
 // ── Background pipeline ───────────────────────────────────────────────────
@@ -48,6 +67,15 @@ builder.Services.AddHostedService<EngineLoop>();
 builder.Logging.AddConsole();
 
 var app = builder.Build();
+
+// ── OTLP: map gRPC service endpoint (same gate as above) ─────────────────
+// MapGrpcService requires WebApplication (not available at builder time), so it lives here.
+// The OtlpTraceService is only reachable on port 4317 (HTTP/2); the 8080 WS/REST
+// endpoints are unaffected — UseWebSockets() and MapGet() below continue to bind there.
+if (otlpEnabled)
+{
+    app.MapGrpcService<OtlpTraceService>();
+}
 
 // ── WebSocket middleware ───────────────────────────────────────────────────
 app.UseWebSockets();
