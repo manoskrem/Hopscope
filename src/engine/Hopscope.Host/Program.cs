@@ -51,11 +51,38 @@ if (otlpEnabled)
     // AddGrpc registers the gRPC framework middleware (Grpc.AspNetCore.Server).
     builder.Services.AddGrpc();
 
-    // Kestrel: add an HTTP/2 (h2c, plain TCP) listener for gRPC on the OTLP port.
-    // ConfigureKestrel ADDS a listener — it does NOT replace the ASPNETCORE_URLS default
-    // (port 8080 for HTTP/1.1 WebSocket + REST). Both listeners are active.
+    // Kestrel: serve HTTP/1.1 (WS + REST) AND HTTP/2 (h2c gRPC) on separate ports.
+    // IMPORTANT: calling ConfigureKestrel/ListenAnyIP makes Kestrel IGNORE ASPNETCORE_URLS
+    // entirely — so we must re-establish the HTTP/1.1 listener HERE, or /ws + /snapshot
+    // would vanish when OTLP is enabled. We parse the HTTP port out of ASPNETCORE_URLS
+    // (default 8080) and bind both endpoints explicitly.
+    var httpPort = ResolveHttpPort(config["ASPNETCORE_URLS"], defaultPort: 8080);
     builder.WebHost.ConfigureKestrel(o =>
-        o.ListenAnyIP(otlpPort, lo => lo.Protocols = HttpProtocols.Http2));
+    {
+        o.ListenAnyIP(httpPort);   // HTTP/1.1 — WebSocket + REST (was ASPNETCORE_URLS)
+        o.ListenAnyIP(otlpPort, lo => lo.Protocols = HttpProtocols.Http2);  // h2c gRPC (OTLP)
+    });
+}
+
+// Parses the first port from an ASPNETCORE_URLS value (e.g. "http://+:8080" → 8080).
+// Returns the default if the value is absent/unparseable. Manual parse — no reflection.
+static int ResolveHttpPort(string? urls, int defaultPort)
+{
+    if (string.IsNullOrWhiteSpace(urls))
+        return defaultPort;
+
+    // Take the first ';'-separated url, then the substring after the last ':'.
+    var first = urls.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)[0];
+    var colon = first.LastIndexOf(':');
+    if (colon < 0 || colon == first.Length - 1)
+        return defaultPort;
+
+    var portSpan = first.AsSpan(colon + 1);
+    // Strip any trailing path (e.g. ":8080/").
+    var slash = portSpan.IndexOf('/');
+    if (slash >= 0) portSpan = portSpan[..slash];
+
+    return int.TryParse(portSpan, out var p) && p > 0 ? p : defaultPort;
 }
 
 builder.Services.AddFakeIngestionIfNoneRegistered();
