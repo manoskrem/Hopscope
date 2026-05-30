@@ -27,8 +27,13 @@ public sealed class RabbitMqIngestor : IEventIngestor
     private readonly string           _vhost;
     private readonly ILogger          _log;
 
-    // Queue name → last-seen MessageStats for delta detection.
+    // Queue name → last-seen MessageStats for throughput delta detection.
     private readonly Dictionary<string, RmqMessageStats> _prevStats =
+        new(StringComparer.Ordinal);
+
+    // Queue name → last-seen depth (messages). The reliable dead-letter signal:
+    // arrivals raise depth but do not populate message_stats.publish.
+    private readonly Dictionary<string, long> _prevMessages =
         new(StringComparer.Ordinal);
 
     // Monotonic counter for fresh-HopId activity envelopes.
@@ -154,23 +159,39 @@ public sealed class RabbitMqIngestor : IEventIngestor
             // Used to populate Source on activity envelopes.
             var queueToSource = BuildQueueSourceMap(bindings);
 
+            // Classify dead-letter queues for this poll: DLQ name → its DLX exchange.
+            var dlqMap = RabbitMqMapper.IdentifyDeadLetterQueues(queues, bindings);
+
             foreach (var queue in queues)
             {
                 if (ct.IsCancellationRequested) yield break;
 
                 _prevStats.TryGetValue(queue.Name, out var prev);
-                queueToSource.TryGetValue(queue.Name, out var inboundSource);
+                _prevMessages.TryGetValue(queue.Name, out var prevMessages);
+
+                // A DLQ's inbound edge is, by definition, its dead-letter exchange —
+                // prefer that over the first arbitrary binding so the edge is DLX → DLQ.
+                var isDlq = dlqMap.TryGetValue(queue.Name, out var dlxName);
+                string? inboundSource;
+                if (isDlq)
+                    inboundSource = dlxName;
+                else
+                    queueToSource.TryGetValue(queue.Name, out inboundSource);
 
                 var activityEnvelope = RabbitMqMapper.QueueActivityToEnvelope(
                     queue,
                     prev,
+                    prevMessages,
                     inboundSource,
+                    isDlq,
                     ++_activityCounter,
                     now);
 
-                // Update the running stats baseline regardless.
+                // Update the running baselines. Stats only when present (a DLQ's
+                // message_stats stays null); depth always (it's the dead-letter signal).
                 if (queue.MessageStats is not null)
                     _prevStats[queue.Name] = queue.MessageStats;
+                _prevMessages[queue.Name] = queue.Messages;
 
                 if (activityEnvelope is not null)
                     yield return activityEnvelope;

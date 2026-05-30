@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Hopscope.Infrastructure.Providers.RabbitMq;
@@ -44,6 +45,14 @@ internal sealed record RmqMessageStats
     /// <summary>Total messages delivered out of this queue (acks + nacks).</summary>
     [JsonPropertyName("deliver_get")]
     public long DeliverGet { get; init; }
+
+    /// <summary>
+    /// Total messages redelivered out of this queue (delivered with the
+    /// <c>redelivered</c> flag set — i.e. a consumer nacked/requeued and the
+    /// broker re-attempted). A positive delta is the honest "Retrying" signal.
+    /// </summary>
+    [JsonPropertyName("redeliver")]
+    public long Redeliver { get; init; }
 }
 
 /// <summary>
@@ -57,9 +66,29 @@ internal sealed record RmqQueue
     [JsonPropertyName("vhost")]
     public string Vhost { get; init; } = "/";
 
+    /// <summary>
+    /// Current queue depth (ready + unacknowledged). A gauge that is <em>always</em>
+    /// present — unlike <see cref="MessageStats"/>. This is the reliable dead-letter
+    /// signal: messages dead-lettered into a DLQ raise its depth but do NOT populate
+    /// <c>message_stats.publish</c> (only direct channel publishes do).
+    /// </summary>
+    [JsonPropertyName("messages")]
+    public long Messages { get; init; }
+
     /// <summary>May be absent when the queue has never received a message.</summary>
     [JsonPropertyName("message_stats")]
     public RmqMessageStats? MessageStats { get; init; }
+
+    /// <summary>
+    /// The queue's declaration arguments (x-arguments). Held as a raw
+    /// <see cref="JsonElement"/> because the object mixes value types — e.g.
+    /// <c>x-dead-letter-exchange</c> is a string while <c>x-message-ttl</c> is a
+    /// number — which a typed <c>Dictionary&lt;string,string&gt;</c> would reject.
+    /// <see cref="JsonElement"/> has a built-in converter (AOT-safe, no extra
+    /// source-gen registration). Absent <c>arguments</c> ⇒ <c>ValueKind.Undefined</c>.
+    /// </summary>
+    [JsonPropertyName("arguments")]
+    public JsonElement Arguments { get; init; }
 }
 
 /// <summary>
