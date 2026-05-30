@@ -44,3 +44,25 @@ jobs:
             echo "::error::Engine image ${MB} MB exceeds the 60 MB footprint gate"
             exit 1
           fi
+
+  ui:
+    name: ui
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: src/ui/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build
+        run: npm run build
+      - name: Unit tests
+        run: npm test
