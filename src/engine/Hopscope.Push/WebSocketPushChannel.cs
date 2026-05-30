@@ -111,24 +111,46 @@ public sealed class WebSocketPushChannel : IPushChannel
     /// open by running a receive loop (inbound messages are ignored — this is a
     /// server-push channel). Removes the client on close, error, or cancellation.
     ///
-    /// Gap-recovery TODO: if the client detects a sequence gap it should reconnect
-    /// to receive a fresh snapshot; a full re-snapshot-on-gap path is deferred to
-    /// Phase 2 when a real broker provider is wired.
+    /// Connect-race safety: the client is added to <see cref="_clients"/> BEFORE the
+    /// snapshot is captured, and the snapshot is captured + sent while holding the
+    /// client's send lock. This closes the window where a delta broadcast between
+    /// "capture snapshot" and "register client" would reach no one: any delta emitted
+    /// after registration is either already reflected in the snapshot captured here,
+    /// or is queued behind the send lock and delivered after the snapshot. The client
+    /// drops any delta whose sequence is &lt;= the snapshot's sequence (idempotent
+    /// upserts make that safe) and reconnects for a fresh snapshot on a forward gap.
+    ///
+    /// <paramref name="captureSnapshot"/> is invoked lazily here (not pre-captured by
+    /// the caller) precisely so the capture happens after registration.
     /// </summary>
     public async Task HandleClientAsync(
         string connectionId,
         WebSocket socket,
-        GraphSnapshot initialSnapshot,
+        Func<GraphSnapshot> captureSnapshot,
         CancellationToken ct)
     {
         var conn = new ClientConn(socket);
+        // Register FIRST — see the connect-race note above.
         _clients[connectionId] = conn;
 
         try
         {
-            // Send the snapshot first, before the client starts receiving deltas.
-            var frame = new PushFrame("snapshot", initialSnapshot, null);
-            await SendFrameAsync(conn, frame, ct).ConfigureAwait(false);
+            // Capture + send the snapshot while holding the per-client send lock, so no
+            // concurrent BroadcastAsync can interleave a delta ahead of the snapshot.
+            await conn.SendLock.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                var json = JsonSerializer.Serialize(
+                    new PushFrame("snapshot", captureSnapshot(), null),
+                    AppJsonSerializerContext.Default.PushFrame);
+                var bytes = Encoding.UTF8.GetBytes(json);
+                await conn.Socket.SendAsync(
+                    bytes, WebSocketMessageType.Text, endOfMessage: true, ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                conn.SendLock.Release();
+            }
 
             // Receive loop: drain inbound frames so the WebSocket stays healthy;
             // a Close frame from the client exits the loop cleanly.

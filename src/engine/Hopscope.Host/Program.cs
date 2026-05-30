@@ -1,4 +1,3 @@
-using System.Net.WebSockets;
 using Hopscope.Application.Abstractions;
 using Hopscope.Application.Aggregation;
 using Hopscope.Application.Pipeline;
@@ -103,11 +102,13 @@ app.MapGet("/ws", async (HttpContext ctx,
 
     var socket       = await ctx.WebSockets.AcceptWebSocketAsync();
     var connectionId = Guid.NewGuid().ToString("N");
-    var snapshot     = aggregator.Snapshot();
 
     // Cast is safe: WebSocketPushChannel is the sole registered IPushChannel.
+    // Pass the snapshot factory (not a pre-captured snapshot) so the hub captures it
+    // AFTER registering the client — closing the connect race where a delta emitted
+    // between capture and registration would reach no one.
     var hub = (WebSocketPushChannel)push;
-    await hub.HandleClientAsync(connectionId, socket, snapshot, ct);
+    await hub.HandleClientAsync(connectionId, socket, aggregator.Snapshot, ct);
 });
 
 app.Run();
