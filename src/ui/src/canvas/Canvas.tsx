@@ -9,6 +9,7 @@ import {
   useEdgesState,
   useNodesState,
   useReactFlow,
+  type EdgeMouseHandler,
   type NodeMouseHandler,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
@@ -25,6 +26,7 @@ import { NO_SELECTION, type HopFlowEdge, type HopFlowNode, type Selection } from
 export interface CanvasProps {
   focusedId: string | null;
   onFocus: (id: string | null) => void;
+  onSelectEdge?: (source: string, target: string) => void;
 }
 
 /** Status-colored arrow markers, referenced by edges via url(#hop-arrow-<status>). */
@@ -54,7 +56,7 @@ function ArrowMarkers() {
   );
 }
 
-function CanvasInner({ focusedId, onFocus }: CanvasProps) {
+function CanvasInner({ focusedId, onFocus, onSelectEdge }: CanvasProps) {
   const state = useGraphState();
   const { fitView } = useReactFlow();
 
@@ -103,6 +105,10 @@ function CanvasInner({ focusedId, onFocus }: CanvasProps) {
 
   const onNodeClick = useCallback<NodeMouseHandler>((_event, node) => onFocus(node.id), [onFocus]);
   const onPaneClick = useCallback(() => onFocus(null), [onFocus]);
+  const onEdgeClick = useCallback<EdgeMouseHandler>(
+    (_event, edge) => onSelectEdge?.(edge.source, edge.target),
+    [onSelectEdge],
+  );
 
   return (
     <ReactFlow
@@ -113,6 +119,7 @@ function CanvasInner({ focusedId, onFocus }: CanvasProps) {
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
       onNodeClick={onNodeClick}
+      onEdgeClick={onEdgeClick}
       onPaneClick={onPaneClick}
       nodesDraggable={false}
       nodesConnectable={false}

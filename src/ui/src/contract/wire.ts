@@ -5,6 +5,11 @@
 // arrive as 0..3, not strings. Keep this file congruent with:
 //   Hopscope.Domain/Topology/{NodeKind,GraphNode,GraphEdge,GraphSnapshot,GraphDelta,PushFrame}.cs
 //   Hopscope.Domain/Events/ExecutionStatus.cs
+//   Hopscope.Domain/Events/EventEnvelope.cs
+//   Hopscope.Domain/Events/ErrorDetails.cs
+//   Hopscope.Domain/Tracing/HopNode.cs
+//   Hopscope.Domain/Tracing/TraceView.cs
+//   Hopscope.Domain/Tracing/TraceSummary.cs
 
 /** Congruent with Hopscope.Domain.Topology.NodeKind (integer wire values). */
 export const NodeKind = {
@@ -23,6 +28,51 @@ export const ExecutionStatus = {
   Failed: 3,
 } as const;
 export type ExecutionStatus = (typeof ExecutionStatus)[keyof typeof ExecutionStatus];
+
+/** Congruent with Hopscope.Domain.Events.ErrorDetails. */
+export interface ErrorDetails {
+  exceptionType: string;
+  message: string;
+  truncatedStackTrace: string | null;
+}
+
+/** Congruent with Hopscope.Domain.Events.EventEnvelope. */
+export interface EventEnvelope {
+  traceId: string;
+  hopId: string;
+  parentHopId: string | null;
+  source: string;
+  destination: string;
+  brokerType: string;
+  /** Metadata only — never message bodies. */
+  payloadMetadata: Record<string, string>;
+  /** ISO-8601 UTC string. */
+  timestamp: string;
+  executionStatus: ExecutionStatus;
+  errorDetails: ErrorDetails | null;
+}
+
+/** Congruent with Hopscope.Domain.Tracing.HopNode (recursive tree). */
+export interface HopNode {
+  envelope: EventEnvelope;
+  children: HopNode[];
+}
+
+/** Congruent with Hopscope.Domain.Tracing.TraceView. */
+export interface TraceView {
+  traceId: string;
+  roots: HopNode[];
+  hopCount: number;
+}
+
+/** Congruent with Hopscope.Domain.Tracing.TraceSummary. */
+export interface TraceSummary {
+  traceId: string;
+  hopCount: number;
+  worstStatus: ExecutionStatus;
+  hasError: boolean;
+  lastTimestamp: string;
+}
 
 export interface GraphNode {
   id: string;

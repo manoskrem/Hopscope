@@ -1,0 +1,314 @@
+/* TraceDetailPanel — causal-chain drill-down side panel.
+ *
+ * Mirrors the err-card pattern; uses only theme.css tokens. */
+
+/* ---- panel shell ---------------------------------------------------------- */
+.trace-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.trace-panel__header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 11px;
+}
+
+.trace-panel__title {
+  flex: 1;
+  min-width: 0;
+}
+
+.trace-panel__edge-label {
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  color: var(--dim);
+  text-transform: uppercase;
+  margin-bottom: 3px;
+}
+
+.trace-panel__route {
+  font-size: 11px;
+  color: var(--text);
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trace-panel__close {
+  flex: none;
+  background: none;
+  border: none;
+  color: var(--dim);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+  margin-top: -1px;
+  transition: color 0.12s;
+}
+.trace-panel__close:hover {
+  color: var(--text);
+}
+
+/* ---- hop tree ------------------------------------------------------------- */
+.hop-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Indent child hop groups under their parent */
+.hop-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hop-group--child {
+  margin-left: 12px;
+  padding-left: 8px;
+  border-left: 1px solid var(--line-2);
+}
+
+/* ---- individual hop card -------------------------------------------------- */
+.hop-card {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--dim);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  padding: 8px 9px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  position: relative;
+  transition: box-shadow 0.15s ease;
+}
+
+/* Status-specific left stripe and background tints */
+.hop-card--ok {
+  border-left-color: var(--ok);
+}
+.hop-card--retry {
+  border-left-color: var(--retry);
+  background: #141109;
+}
+.hop-card--dlq {
+  border-left-color: var(--dlq);
+  background: #140a13;
+}
+.hop-card--fail {
+  border-left-color: var(--fail);
+  background: #140909;
+}
+
+/* Failure/DLQ hero glow effect */
+.hop-card--dlq {
+  box-shadow: -2px 0 8px rgba(255, 73, 208, 0.25);
+}
+.hop-card--fail {
+  box-shadow: -2px 0 8px rgba(255, 77, 77, 0.25);
+}
+
+/* ---- hop card rows -------------------------------------------------------- */
+.hop-card__route {
+  font-weight: 700;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-bottom: 4px;
+}
+
+.hop-card__meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 4px;
+}
+
+.hop-card__timestamp {
+  color: var(--faint);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  flex: 1;
+}
+
+/* ---- status pill ---------------------------------------------------------- */
+.hop-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 2px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  flex: none;
+}
+
+.hop-pill--ok {
+  color: var(--ok);
+  background: rgba(55, 240, 138, 0.1);
+  border: 1px solid rgba(55, 240, 138, 0.25);
+}
+.hop-pill--retry {
+  color: var(--retry);
+  background: rgba(255, 181, 71, 0.1);
+  border: 1px solid rgba(255, 181, 71, 0.25);
+}
+.hop-pill--dlq {
+  color: var(--dlq);
+  background: rgba(255, 73, 208, 0.1);
+  border: 1px solid rgba(255, 73, 208, 0.25);
+  text-shadow: 0 0 8px var(--glow-dlq);
+}
+.hop-pill--fail {
+  color: var(--fail);
+  background: rgba(255, 77, 77, 0.1);
+  border: 1px solid rgba(255, 77, 77, 0.25);
+  text-shadow: 0 0 8px var(--glow-fail);
+}
+.hop-pill--unknown {
+  color: var(--dim);
+  background: rgba(125, 149, 138, 0.1);
+  border: 1px solid rgba(125, 149, 138, 0.2);
+}
+
+/* ---- payload metadata ----------------------------------------------------- */
+.hop-card__meta-table {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 8px;
+  row-gap: 2px;
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid var(--line);
+}
+
+.hop-card__meta-key {
+  color: var(--dim);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 90px;
+}
+
+.hop-card__meta-val {
+  color: var(--text);
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- error details -------------------------------------------------------- */
+.hop-card__error {
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(255, 77, 77, 0.3);
+  background: rgba(255, 77, 77, 0.06);
+}
+
+.hop-card--dlq .hop-card__error {
+  border-color: rgba(255, 73, 208, 0.35);
+  background: rgba(255, 73, 208, 0.07);
+}
+
+.hop-card__error-type {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--fail);
+  margin-bottom: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hop-card--dlq .hop-card__error-type {
+  color: var(--dlq);
+}
+
+.hop-card__error-msg {
+  font-size: 10px;
+  color: var(--text);
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.hop-card__error-stack {
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid var(--line);
+  font-size: 9px;
+  color: var(--dim);
+  white-space: pre-wrap;
+  word-break: break-all;
+  line-height: 1.55;
+  max-height: 80px;
+  overflow-y: auto;
+}
+
+/* ---- loading state -------------------------------------------------------- */
+.trace-panel__loading {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 0;
+}
+
+.trace-panel__skel {
+  height: 56px;
+  border-radius: var(--radius);
+  background: linear-gradient(
+    90deg,
+    var(--panel-2) 0%,
+    var(--line-2) 40%,
+    var(--panel-2) 100%
+  );
+  background-size: 200% 100%;
+  animation: skel-scan 1.4s ease-in-out infinite;
+}
+
+.trace-panel__skel:nth-child(2) {
+  height: 44px;
+  animation-delay: 0.18s;
+}
+.trace-panel__skel:nth-child(3) {
+  height: 50px;
+  animation-delay: 0.36s;
+}
+
+@keyframes skel-scan {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+/* ---- error / empty states ------------------------------------------------- */
+.trace-panel__error {
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 77, 77, 0.3);
+  border-left: 3px solid var(--fail);
+  border-radius: var(--radius);
+  background: #140909;
+  color: var(--fail);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.trace-panel__empty {
+  color: var(--faint);
+  font-size: 12px;
+  padding: 4px 0;
+}

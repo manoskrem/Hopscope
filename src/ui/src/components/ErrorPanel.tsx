@@ -5,9 +5,10 @@ interface ErrorPanelProps {
   errors: GraphEdge[];
   focusedId: string | null;
   onFocus: (id: string | null) => void;
+  onSelectEdge?: (source: string, target: string) => void;
 }
 
-export function ErrorPanel({ errors, focusedId, onFocus }: ErrorPanelProps) {
+export function ErrorPanel({ errors, focusedId, onFocus, onSelectEdge }: ErrorPanelProps) {
   return (
     <section className="rail-section">
       <h3 className="rail-h">ERRORS ({errors.length})</h3>
@@ -24,7 +25,10 @@ export function ErrorPanel({ errors, focusedId, onFocus }: ErrorPanelProps) {
                 type="button"
                 key={edge.id}
                 className={`err-card err-card--${v.className}${active ? ' is-active' : ''}`}
-                onClick={() => onFocus(active ? null : edge.sourceId)}
+                onClick={() => {
+                  onFocus(active ? null : edge.sourceId);
+                  onSelectEdge?.(edge.sourceId, edge.targetId);
+                }}
                 title={`Focus connections of ${edge.sourceId}`}
               >
                 <span className="err-card__top">

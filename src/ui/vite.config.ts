@@ -15,6 +15,8 @@ export default defineConfig({
     proxy: {
       '/ws': { target: ENGINE, ws: true, changeOrigin: true },
       '/snapshot': { target: ENGINE, changeOrigin: true },
+      '/traces': { target: ENGINE, changeOrigin: true },
+      '/trace': { target: ENGINE, changeOrigin: true },
     },
   },
   test: {
