@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
@@ -22,7 +23,7 @@ type Event struct {
 	Data []byte
 }
 
-// Capture loads the eBPF program, attaches the tcp_sendmsg kprobe, and streams
+// Capture loads the eBPF program, attaches the tcp_sendmsg fentry hook, and streams
 // decoded Events. It requires CAP_BPF/CAP_PERFMON (or privileged) and kernel BTF.
 type Capture struct {
 	objs   bpfObjects
@@ -41,20 +42,23 @@ func NewCapture() (*Capture, error) {
 		return nil, fmt.Errorf("load bpf objects (need kernel BTF at /sys/kernel/btf): %w", err)
 	}
 
-	kp, err := link.Kprobe("tcp_sendmsg", objs.RedisTcpSendmsg, nil)
+	lk, err := link.AttachTracing(link.TracingOptions{
+		Program:    objs.RedisTcpSendmsg,
+		AttachType: ebpf.AttachTraceFEntry,
+	})
 	if err != nil {
 		objs.Close()
-		return nil, fmt.Errorf("attach kprobe tcp_sendmsg: %w", err)
+		return nil, fmt.Errorf("attach fentry tcp_sendmsg: %w", err)
 	}
 
 	rd, err := ringbuf.NewReader(objs.Events)
 	if err != nil {
-		kp.Close()
+		lk.Close()
 		objs.Close()
 		return nil, fmt.Errorf("open ring buffer: %w", err)
 	}
 
-	return &Capture{objs: objs, link: kp, reader: rd}, nil
+	return &Capture{objs: objs, link: lk, reader: rd}, nil
 }
 
 // Run reads events until ctx is cancelled, invoking handle for each decoded Event.

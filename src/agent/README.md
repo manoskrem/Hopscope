@@ -10,16 +10,17 @@ It is the second half of the no-code seam: the engine already hosts the client-s
 ## How it works
 
 ```
-tcp_sendmsg (eBPF kprobe, kernel-global)
+tcp_sendmsg (eBPF fentry, kernel-global)
    │  bounded prefix of the request + issuing process (comm/pid)
    ▼
 ring buffer ──► RESP parse (verb + first key ONLY) ──► EventEnvelope ──► gRPC Stream ──► engine
 ```
 
-- **Capture** (`internal/bpf`): a CO-RE eBPF kprobe on `tcp_sendmsg` fires for every TCP
-  send on the host kernel — regardless of which container issued it — keeps only sends to the
+- **Capture** (`internal/bpf`): a CO-RE eBPF **fentry** hook on `tcp_sendmsg` fires for every
+  TCP send on the host kernel — regardless of which container issued it — keeps only sends to the
   Redis port, and copies a bounded **prefix** of the request bytes plus the issuing process
-  (`bpf_get_current_comm`) into a ring buffer.
+  (`bpf_get_current_comm`) into a ring buffer. fentry gives typed args from BTF, so one bytecode
+  loads on any little-endian arch (amd64 + arm64).
 - **Parse** (`internal/resp`): extracts the command verb and the **first key/channel only**.
 - **Map** (`internal/mapper`): builds an `EventEnvelope` shaped exactly like the in-proc Redis
   provider's (a `Redis` Topic keyed by the key-prefix), but with the real **client process** in
@@ -38,8 +39,9 @@ value never appears in a serialized envelope.
 ## Build & run
 
 The agent loads eBPF and therefore needs **Linux with kernel BTF** and **CAP_BPF/CAP_PERFMON**
-(or `--privileged`). It runs **amd64-only** for now — BTF/kprobe are unreliable on Apple-Silicon
-Docker, by design.
+(or `--privileged`). Thanks to fentry it is **arch-portable** — it runs on any little-endian
+kernel with BTF, including **Docker Desktop on Apple Silicon** (whose LinuxKit kernel ships BTF)
+and the amd64 CI runner.
 
 ```bash
 # Standalone no-code proof stack (engine with NO Redis provider, Redis with keyevents OFF):

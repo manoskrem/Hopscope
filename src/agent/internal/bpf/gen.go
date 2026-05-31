@@ -6,9 +6,8 @@
 // generated wrappers and .o files are gitignored (build artifacts, not source). On non-Linux
 // dev machines this file is the only member of the package, so it still compiles.
 //
-// -D__TARGET_ARCH_x86: BPF_KPROBE needs the target kernel arch for PT_REGS access. The agent
-// runs amd64-only (the nightly runner / x86 kernels — BTF+kprobe are unreliable on the
-// Apple-Silicon dev Docker, by design), so x86 is correct everywhere it actually runs.
+// The program uses fentry (typed BTF args), so it needs no __TARGET_ARCH define and the single
+// little-endian object loads on both amd64 (the nightly runner) and arm64 (dev) kernels alike.
 package bpf
 
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -type redis_event -cc clang -cflags "-O2 -g -Wall -D__TARGET_ARCH_x86" bpf redis.bpf.c
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -type redis_event -cc clang -cflags "-O2 -g -Wall" bpf redis.bpf.c
