@@ -52,9 +52,15 @@ services:
       # in-proc receiver re-binds both the :8080 HTTP/1.1 and :4317 HTTP/2 listeners explicitly
       # (see Program.cs) so the WS/REST control-plane stays up alongside gRPC.
       HOPSCOPE_OTLP_ENABLED: "true"
+      # Remote-agent gRPC receiver on :4318 — the Phase-5 no-code seam. The engine hosts the
+      # client-streaming hopscope.v1.Ingestion/Stream RPC; the Go eBPF agent (or agent-check.sh
+      # via grpcurl) streams normalized envelopes through the SAME IEventIngestor path every
+      # in-proc provider uses, co-rendering on one canvas. Distinct port from OTLP's 4317.
+      HOPSCOPE_AGENT_ENABLED: "true"
     ports:
       - "8085:8080"
       - "4317:4317"   # OTLP gRPC (h2c) — for OTLP exporters running on the host
+      - "4318:4318"   # Agent gRPC (h2c) — for the remote eBPF agent / agent-check.sh
     depends_on:
       rabbitmq:
         condition: service_healthy

@@ -45,6 +45,21 @@
               ProtoRoot="Providers/Otlp/protos" />
   </ItemGroup>
 
+  <!-- Hopscope agent contract — the SHARED cross-language wire definition (engine gRPC server
+       <-> Go eBPF agent client). Lives at repo-root contracts/proto, OUTSIDE this project dir,
+       referenced via a relative path + matching ProtoRoot. GrpcServices="Server" generates only
+       the Ingestion service base (the engine receives the agent's client-stream, never calls out).
+       The google/protobuf/timestamp.proto import resolves from Grpc.Tools' bundled well-known-types
+       include path (added independently of ProtoRoot) — do NOT vendor it here (duplicate-definition).
+       Generated types land in the Hopscope.Contracts.V1 namespace (option csharp_namespace) and in
+       obj/ (nothing in the source tree). The arm64 system-protoc override in the Dockerfile already
+       covers this <Protobuf> item — no Docker change needed. -->
+  <ItemGroup>
+    <Protobuf Include="..\..\..\contracts\proto\event.proto"
+              GrpcServices="Server"
+              ProtoRoot="..\..\..\contracts\proto" />
+  </ItemGroup>
+
   <!-- Confluent.Kafka P/Invokes native librdkafka (P/Invoke is AOT-fine), but the managed
        wrapper produces trim warnings → referenced ONLY in the Kafka variant. -->
   <ItemGroup Condition="'$(EnableKafka)' == 'true'">

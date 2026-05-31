@@ -2,6 +2,7 @@ using Hopscope.Application.Abstractions;
 using Hopscope.Application.Aggregation;
 using Hopscope.Application.Pipeline;
 using Hopscope.Application.Projection;
+using Hopscope.Infrastructure.Providers.Agent;
 using Hopscope.Infrastructure.Providers.Fake;
 using Hopscope.Infrastructure.Providers.Otlp;
 using Hopscope.Infrastructure.Providers.RabbitMq;
@@ -42,25 +43,35 @@ builder.Services.AddRedisIngestion(config);
 builder.Services.AddKafkaIngestion(config);
 #endif
 
-// ── OTLP gRPC receiver (flagged gate exception — touches Program.cs in two places) ──
+// ── gRPC receivers: OTLP (4317) and the remote Agent (4318) ──────────────────────
+// Both are INDEPENDENT, default-OFF gates (HOPSCOPE_OTLP_ENABLED / HOPSCOPE_AGENT_ENABLED).
 // Grpc.AspNetCore + Google.Protobuf are AOT-safe (generated parse/serialize paths only).
-// When disabled: registers nothing; Fake fallback still works.
-var (otlpEnabled, otlpPort) = builder.Services.AddOtlpIngestion(config);
-if (otlpEnabled)
+// When both are disabled: registers nothing; the Fake fallback still works.
+var (otlpEnabled,  otlpPort)  = builder.Services.AddOtlpIngestion(config);
+var (agentEnabled, agentPort) = builder.Services.AddAgentIngestion(config);
+
+if (otlpEnabled && agentEnabled && otlpPort == agentPort)
+    throw new InvalidOperationException(
+        $"HOPSCOPE_OTLP_PORT and HOPSCOPE_AGENT_PORT must differ (both = {otlpPort}).");
+
+if (otlpEnabled || agentEnabled)
 {
-    // AddGrpc registers the gRPC framework middleware (Grpc.AspNetCore.Server).
+    // AddGrpc registers the gRPC framework middleware ONCE — even if BOTH receivers are on.
     builder.Services.AddGrpc();
 
-    // Kestrel: serve HTTP/1.1 (WS + REST) AND HTTP/2 (h2c gRPC) on separate ports.
-    // IMPORTANT: calling ConfigureKestrel/ListenAnyIP makes Kestrel IGNORE ASPNETCORE_URLS
-    // entirely — so we must re-establish the HTTP/1.1 listener HERE, or /ws + /snapshot
-    // would vanish when OTLP is enabled. We parse the HTTP port out of ASPNETCORE_URLS
-    // (default 8080) and bind both endpoints explicitly.
+    // ONE Kestrel config. IMPORTANT: calling ConfigureKestrel/ListenAnyIP makes Kestrel IGNORE
+    // ASPNETCORE_URLS entirely, AND these actions are ADDITIVE (a second ConfigureKestrel would
+    // double-bind the HTTP port → AddressInUseException). So we re-establish the HTTP/1.1 listener
+    // HERE (or /ws + /snapshot vanish) and add each enabled gRPC port as h2c in the SAME block.
+    // Verify with lsof/curl, never by trusting this comment (PR #9 lesson).
     var httpPort = ResolveHttpPort(config["ASPNETCORE_URLS"], defaultPort: 8080);
     builder.WebHost.ConfigureKestrel(o =>
     {
         o.ListenAnyIP(httpPort);   // HTTP/1.1 — WebSocket + REST (was ASPNETCORE_URLS)
-        o.ListenAnyIP(otlpPort, lo => lo.Protocols = HttpProtocols.Http2);  // h2c gRPC (OTLP)
+        if (otlpEnabled)
+            o.ListenAnyIP(otlpPort,  lo => lo.Protocols = HttpProtocols.Http2);   // h2c gRPC (OTLP)
+        if (agentEnabled)
+            o.ListenAnyIP(agentPort, lo => lo.Protocols = HttpProtocols.Http2);   // h2c gRPC (Agent)
     });
 }
 
@@ -95,13 +106,19 @@ builder.Logging.AddConsole();
 
 var app = builder.Build();
 
-// ── OTLP: map gRPC service endpoint (same gate as above) ─────────────────
+// ── Map gRPC service endpoints (same gates as above) ─────────────────────
 // MapGrpcService requires WebApplication (not available at builder time), so it lives here.
-// The OtlpTraceService is only reachable on port 4317 (HTTP/2); the 8080 WS/REST
-// endpoints are unaffected — UseWebSockets() and MapGet() below continue to bind there.
+// Each service is reachable ONLY on its HTTP/2 gRPC port; the 8080 WS/REST endpoints are
+// unaffected — UseWebSockets() and MapGet() below continue to bind there. MapGrpcService<T>
+// activates the service via ActivatorUtilities (its ctor args resolve from DI) — no explicit
+// service registration is needed.
 if (otlpEnabled)
 {
     app.MapGrpcService<OtlpTraceService>();
+}
+if (agentEnabled)
+{
+    app.MapGrpcService<AgentIngestionService>();
 }
 
 // ── WebSocket middleware ───────────────────────────────────────────────────
