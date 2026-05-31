@@ -57,6 +57,17 @@ public sealed class StateAggregator : IStateAggregator
     private readonly Queue<string> _traceOrder = new();
 
     // ------------------------------------------------------------------
+    // Lock guarding the per-trace store (_traceHops / _traceOrder).
+    // The topology path (_nodes / _edges) is single-writer only and
+    // needs no lock. HTTP reader threads (GetTrace, GetTraces, /trace,
+    // /traces) take this lock for the duration of their scan; the writer
+    // (EngineLoop via IngestAsync) takes it only for the trace-store
+    // mutation region so topology upserts and the sequence bump remain
+    // outside the critical section.
+    // ------------------------------------------------------------------
+    private readonly object _traceGate = new();
+
+    // ------------------------------------------------------------------
     // Monotonic sequence counter
     // ------------------------------------------------------------------
     private long _sequence;
@@ -109,33 +120,36 @@ public sealed class StateAggregator : IStateAggregator
             _edges[edgeId] = new EdgeState(1, evt.ExecutionStatus);
         }
 
-        // --- Correlation: store hop in per-trace list ---
-        if (!_traceHops.TryGetValue(evt.TraceId, out var hopList))
+        // --- Correlation: store hop in per-trace list (lock guards concurrent readers) ---
+        lock (_traceGate)
         {
-            // First hop for this trace — register insertion order
-            hopList = new List<EventEnvelope>();
-            _traceHops[evt.TraceId] = hopList;
-            _traceOrder.Enqueue(evt.TraceId);
-
-            // --- Eviction: shed oldest trace when over the limit ---
-            while (_traceOrder.Count > _maxTraces)
+            if (!_traceHops.TryGetValue(evt.TraceId, out var hopList))
             {
-                var oldest = _traceOrder.Dequeue();
-                // Purge the evicted trace's HopIds too, so the dedupe set stays bounded
-                // to the retained window. This is *windowed* idempotency: a late duplicate
-                // of an already-evicted hop is treated as new — correct for a bounded debug
-                // window (the old hop has left memory anyway).
-                if (_traceHops.TryGetValue(oldest, out var evictedHops))
+                // First hop for this trace — register insertion order
+                hopList = new List<EventEnvelope>();
+                _traceHops[evt.TraceId] = hopList;
+                _traceOrder.Enqueue(evt.TraceId);
+
+                // --- Eviction: shed oldest trace when over the limit ---
+                while (_traceOrder.Count > _maxTraces)
                 {
-                    foreach (var e in evictedHops)
-                        _seenHopIds.Remove(e.HopId);
+                    var oldest = _traceOrder.Dequeue();
+                    // Purge the evicted trace's HopIds too, so the dedupe set stays bounded
+                    // to the retained window. This is *windowed* idempotency: a late duplicate
+                    // of an already-evicted hop is treated as new — correct for a bounded debug
+                    // window (the old hop has left memory anyway).
+                    if (_traceHops.TryGetValue(oldest, out var evictedHops))
+                    {
+                        foreach (var e in evictedHops)
+                            _seenHopIds.Remove(e.HopId);
+                    }
+                    _traceHops.Remove(oldest);
+                    // _nodes / _edges intentionally retained (topology memory is bounded
+                    // by unique svc×dest pairs, not by message volume)
                 }
-                _traceHops.Remove(oldest);
-                // _nodes / _edges intentionally retained (topology memory is bounded
-                // by unique svc×dest pairs, not by message volume)
             }
+            hopList.Add(evt);
         }
-        hopList.Add(evt);
 
         // --- Stamp monotonic sequence ---
         var seq = ++_sequence;
@@ -169,50 +183,148 @@ public sealed class StateAggregator : IStateAggregator
     /// <inheritdoc />
     public TraceView? GetTrace(string traceId)
     {
-        if (!_traceHops.TryGetValue(traceId, out var hops))
-            return null;
-
-        // Build a lookup: HopId → envelope (fast child-lookup)
-        var byHopId = new Dictionary<string, EventEnvelope>(hops.Count, StringComparer.Ordinal);
-        foreach (var h in hops)
-            byHopId[h.HopId] = h;
-
-        // Build children map: parentHopId → list of children envelopes
-        var childrenOf = new Dictionary<string, List<EventEnvelope>>(StringComparer.Ordinal);
-        foreach (var h in hops)
+        lock (_traceGate)
         {
-            // A hop is a root if it has no parent, its parent is not in this
-            // trace's hop set, or it points to itself (cycle of length 1).
-            var parentId = h.ParentHopId;
-            bool isRoot  = string.IsNullOrEmpty(parentId)
-                           || !byHopId.ContainsKey(parentId)
-                           || parentId == h.HopId;   // self-cycle guard
+            if (!_traceHops.TryGetValue(traceId, out var hops))
+                return null;
 
-            if (!isRoot)
+            // Snapshot the list so tree-building runs outside the lock.
+            // Records (EventEnvelope) are immutable — safe to share.
+            var hopsCopy = new List<EventEnvelope>(hops);
+
+            // Build a lookup: HopId → envelope (fast child-lookup)
+            var byHopId = new Dictionary<string, EventEnvelope>(hopsCopy.Count, StringComparer.Ordinal);
+            foreach (var h in hopsCopy)
+                byHopId[h.HopId] = h;
+
+            // Build children map: parentHopId → list of children envelopes
+            var childrenOf = new Dictionary<string, List<EventEnvelope>>(StringComparer.Ordinal);
+            foreach (var h in hopsCopy)
             {
-                if (!childrenOf.TryGetValue(parentId!, out var childList))
+                // A hop is a root if it has no parent, its parent is not in this
+                // trace's hop set, or it points to itself (cycle of length 1).
+                var parentId = h.ParentHopId;
+                bool isRoot  = string.IsNullOrEmpty(parentId)
+                               || !byHopId.ContainsKey(parentId)
+                               || parentId == h.HopId;   // self-cycle guard
+
+                if (!isRoot)
                 {
-                    childList = new List<EventEnvelope>();
-                    childrenOf[parentId!] = childList;
+                    if (!childrenOf.TryGetValue(parentId!, out var childList))
+                    {
+                        childList = new List<EventEnvelope>();
+                        childrenOf[parentId!] = childList;
+                    }
+                    childList.Add(h);
                 }
-                childList.Add(h);
             }
-        }
 
-        // Collect roots (hops not claimed as children of any known parent)
-        var roots = new List<HopNode>();
-        foreach (var h in hops)
+            // Collect roots (hops not claimed as children of any known parent)
+            var roots = new List<HopNode>();
+            foreach (var h in hopsCopy)
+            {
+                var parentId = h.ParentHopId;
+                bool isRoot  = string.IsNullOrEmpty(parentId)
+                               || !byHopId.ContainsKey(parentId)
+                               || parentId == h.HopId;
+
+                if (isRoot)
+                    roots.Add(BuildHopNode(h, childrenOf, visited: new HashSet<string>(StringComparer.Ordinal)));
+            }
+
+            return new TraceView(traceId, roots, hopsCopy.Count);
+        }
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<TraceSummary> GetTraces(string? status, string? source, string? target, int limit)
+    {
+        lock (_traceGate)
         {
-            var parentId = h.ParentHopId;
-            bool isRoot  = string.IsNullOrEmpty(parentId)
-                           || !byHopId.ContainsKey(parentId)
-                           || parentId == h.HopId;
+            var results = new List<TraceSummary>();
 
-            if (isRoot)
-                roots.Add(BuildHopNode(h, childrenOf, visited: new HashSet<string>(StringComparer.Ordinal)));
+            foreach (var kvp in _traceHops)
+            {
+                var hops = kvp.Value;
+                if (hops.Count == 0)
+                    continue;
+
+                // --- Compute per-trace aggregates (hand-written loops, no LINQ Expressions) ---
+                var worstOrdinal   = 0;
+                var hasError       = false;
+                var lastTimestamp  = DateTimeOffset.MinValue;
+
+                foreach (var h in hops)
+                {
+                    var ord = (int)h.ExecutionStatus;
+                    if (ord > worstOrdinal)
+                        worstOrdinal = ord;
+
+                    if (h.ErrorDetails != null)
+                        hasError = true;
+
+                    if (h.Timestamp > lastTimestamp)
+                        lastTimestamp = h.Timestamp;
+                }
+
+                var worstStatus = (ExecutionStatus)worstOrdinal;
+
+                // --- Status filter (hand-written switch, no Enum.Parse) ---
+                switch (status?.ToLowerInvariant())
+                {
+                    case "failed":
+                        if (worstStatus != ExecutionStatus.Failed)
+                            continue;
+                        break;
+                    case "deadlettered":
+                        if (worstStatus != ExecutionStatus.DeadLettered)
+                            continue;
+                        break;
+                    case "error":
+                        if (worstStatus != ExecutionStatus.Failed && worstStatus != ExecutionStatus.DeadLettered)
+                            continue;
+                        break;
+                    // null / "" / "all" / anything else → no status filter
+                }
+
+                // --- Source / target edge filter ---
+                bool sourceGiven = !string.IsNullOrEmpty(source);
+                bool targetGiven = !string.IsNullOrEmpty(target);
+
+                if (sourceGiven || targetGiven)
+                {
+                    bool matched = false;
+                    foreach (var h in hops)
+                    {
+                        bool srcOk = !sourceGiven || h.Source      == source;
+                        bool tgtOk = !targetGiven || h.Destination == target;
+                        if (srcOk && tgtOk)
+                        {
+                            matched = true;
+                            break;
+                        }
+                    }
+                    if (!matched)
+                        continue;
+                }
+
+                results.Add(new TraceSummary(
+                    TraceId:       kvp.Key,
+                    HopCount:      hops.Count,
+                    WorstStatus:   worstStatus,
+                    HasError:      hasError,
+                    LastTimestamp: lastTimestamp));
+            }
+
+            // Sort newest-first by LastTimestamp (comparison delegate — not an Expression tree)
+            results.Sort((a, b) => b.LastTimestamp.CompareTo(a.LastTimestamp));
+
+            // Cap to caller-supplied limit
+            if (results.Count > limit)
+                results.RemoveRange(limit, results.Count - limit);
+
+            return results;
         }
-
-        return new TraceView(traceId, roots, hops.Count);
     }
 
     // ------------------------------------------------------------------

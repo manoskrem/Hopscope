@@ -49,11 +49,11 @@ jobs:
       # Run all checks (do NOT fail-fast) so one red doesn't hide the others, then fail the job
       # if any failed. jq is preinstalled on ubuntu-latest; otlp-check.sh and agent-check.sh pull
       # the grpcurl image and craft deterministic traces (no telemetrygen dependency).
-      - name: Run broker E2E checks (dlq, redis, kafka, otlp, agent)
+      - name: Run broker E2E checks (dlq, trace, redis, kafka, otlp, agent)
         run: |
           set -u
           fails=()
-          for c in dlq redis kafka otlp agent; do
+          for c in dlq trace redis kafka otlp agent; do
             echo "::group::${c}-check"
             if bash "deploy/e2e/${c}-check.sh"; then
               echo "✓ ${c}-check passed"

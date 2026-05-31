@@ -19,23 +19,26 @@ public sealed class StateAggregatorTests
 
     private static EventEnvelope MakeEnvelope(
         string hopId,
-        string traceId       = "trace-1",
-        string? parentHopId  = null,
-        string source        = "svc-a",
-        string destination   = "q-orders",
-        string brokerType    = "RabbitMQ",
+        string traceId        = "trace-1",
+        string? parentHopId   = null,
+        string source         = "svc-a",
+        string destination    = "q-orders",
+        string brokerType     = "RabbitMQ",
         ExecutionStatus status = ExecutionStatus.Success,
-        Dictionary<string, string>? metadata = null) =>
+        Dictionary<string, string>? metadata = null,
+        ErrorDetails? errorDetails = null,
+        DateTimeOffset? timestamp  = null) =>
         new()
         {
-            HopId        = hopId,
-            TraceId      = traceId,
-            ParentHopId  = parentHopId,
-            Source       = source,
-            Destination  = destination,
-            BrokerType   = brokerType,
-            Timestamp    = DateTimeOffset.UtcNow,
+            HopId           = hopId,
+            TraceId         = traceId,
+            ParentHopId     = parentHopId,
+            Source          = source,
+            Destination     = destination,
+            BrokerType      = brokerType,
+            Timestamp       = timestamp ?? DateTimeOffset.UtcNow,
             ExecutionStatus = status,
+            ErrorDetails    = errorDetails,
             PayloadMetadata = metadata ?? new Dictionary<string, string>()
         };
 
@@ -375,5 +378,202 @@ public sealed class StateAggregatorTests
             CancellationToken.None);
 
         Assert.NotNull(delta); // windowed idempotency: evicted HopId accepted as new
+    }
+
+    // -----------------------------------------------------------------------
+    // 16. GetTraces: 3-hop chain ending in DeadLettered with ErrorDetails
+    //     → single summary with WorstStatus=DeadLettered, HasError=true, HopCount=3
+    // -----------------------------------------------------------------------
+    [Fact]
+    public async Task GetTraces_DeadLetteredChain_SummaryWorstStatusAndHasError()
+    {
+        var agg = MakeAggregator();
+        var ct  = CancellationToken.None;
+
+        // Hop 1: Success, no error
+        await agg.IngestAsync(MakeEnvelope("dl-h1", traceId: "dl-trace",
+            status: ExecutionStatus.Success), ct);
+
+        // Hop 2: Retrying, no error
+        await agg.IngestAsync(MakeEnvelope("dl-h2", traceId: "dl-trace",
+            parentHopId: "dl-h1",
+            status: ExecutionStatus.Retrying), ct);
+
+        // Hop 3: DeadLettered with ErrorDetails
+        var err = new ErrorDetails("PaymentGatewayException", "Gateway timeout", null);
+        await agg.IngestAsync(MakeEnvelope("dl-h3", traceId: "dl-trace",
+            parentHopId: "dl-h2",
+            status: ExecutionStatus.DeadLettered,
+            errorDetails: err), ct);
+
+        var summaries = agg.GetTraces(null, null, null, 1000);
+
+        var s = Assert.Single(summaries);
+        Assert.Equal("dl-trace",               s.TraceId);
+        Assert.Equal(3,                        s.HopCount);
+        Assert.Equal(ExecutionStatus.DeadLettered, s.WorstStatus);
+        Assert.True(s.HasError);
+    }
+
+    // -----------------------------------------------------------------------
+    // 17. GetTraces: status filter isolates Failed / DeadLettered / "error" / null
+    // -----------------------------------------------------------------------
+    [Fact]
+    public async Task GetTraces_StatusFilter_FiltersByWorst()
+    {
+        var agg = MakeAggregator();
+        var ct  = CancellationToken.None;
+
+        // All-Success trace
+        await agg.IngestAsync(MakeEnvelope("sf-h1", traceId: "sf-ok",
+            status: ExecutionStatus.Success), ct);
+
+        // Failed trace
+        await agg.IngestAsync(MakeEnvelope("sf-h2", traceId: "sf-failed",
+            status: ExecutionStatus.Failed), ct);
+
+        // DeadLettered trace
+        await agg.IngestAsync(MakeEnvelope("sf-h3", traceId: "sf-dl",
+            status: ExecutionStatus.DeadLettered), ct);
+
+        // "failed" → only the Failed trace
+        var failedOnly = agg.GetTraces("failed", null, null, 1000);
+        Assert.Single(failedOnly);
+        Assert.Equal("sf-failed", failedOnly[0].TraceId);
+
+        // "deadlettered" → only the DeadLettered trace
+        var dlOnly = agg.GetTraces("deadlettered", null, null, 1000);
+        Assert.Single(dlOnly);
+        Assert.Equal("sf-dl", dlOnly[0].TraceId);
+
+        // "error" → both Failed and DeadLettered
+        var errorBoth = agg.GetTraces("error", null, null, 1000);
+        Assert.Equal(2, errorBoth.Count);
+        Assert.Contains(errorBoth, s => s.TraceId == "sf-failed");
+        Assert.Contains(errorBoth, s => s.TraceId == "sf-dl");
+
+        // null → all three
+        var all = agg.GetTraces(null, null, null, 1000);
+        Assert.Equal(3, all.Count);
+    }
+
+    // -----------------------------------------------------------------------
+    // 18. GetTraces: source+target filter restricts to traces with a hop on that edge
+    // -----------------------------------------------------------------------
+    [Fact]
+    public async Task GetTraces_SourceTargetFilter_RestrictsToEdge()
+    {
+        var agg = MakeAggregator();
+        var ct  = CancellationToken.None;
+
+        // Trace with svc-x → q-target hop
+        await agg.IngestAsync(MakeEnvelope("stf-h1", traceId: "stf-match",
+            source: "svc-x", destination: "q-target"), ct);
+
+        // Trace with svc-x → q-other (same source, different dest)
+        await agg.IngestAsync(MakeEnvelope("stf-h2", traceId: "stf-no-match",
+            source: "svc-x", destination: "q-other"), ct);
+
+        // Filter: source=svc-x AND target=q-target → only stf-match
+        var results = agg.GetTraces(null, "svc-x", "q-target", 1000);
+        Assert.Single(results);
+        Assert.Equal("stf-match", results[0].TraceId);
+
+        // Filter: source=svc-x only → both
+        var srcOnly = agg.GetTraces(null, "svc-x", null, 1000);
+        Assert.Equal(2, srcOnly.Count);
+
+        // Filter: target=q-target only → only stf-match
+        var tgtOnly = agg.GetTraces(null, null, "q-target", 1000);
+        Assert.Single(tgtOnly);
+        Assert.Equal("stf-match", tgtOnly[0].TraceId);
+    }
+
+    // -----------------------------------------------------------------------
+    // 19. GetTraces: limit caps count and results are newest-first by LastTimestamp
+    // -----------------------------------------------------------------------
+    [Fact]
+    public async Task GetTraces_Limit_CapsAndNewestFirst()
+    {
+        var agg  = MakeAggregator();
+        var ct   = CancellationToken.None;
+        var base_ = new DateTimeOffset(2025, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+        // Ingest 5 traces with strictly increasing timestamps
+        for (int i = 0; i < 5; i++)
+        {
+            await agg.IngestAsync(MakeEnvelope($"lim-h{i}", traceId: $"lim-t{i}",
+                timestamp: base_.AddMinutes(i)), ct);
+        }
+
+        // limit=3 → 3 results, newest first (lim-t4, lim-t3, lim-t2)
+        var results = agg.GetTraces(null, null, null, 3);
+        Assert.Equal(3, results.Count);
+        Assert.Equal("lim-t4", results[0].TraceId);
+        Assert.Equal("lim-t3", results[1].TraceId);
+        Assert.Equal("lim-t2", results[2].TraceId);
+
+        // Results are strictly descending by LastTimestamp
+        for (int i = 0; i < results.Count - 1; i++)
+            Assert.True(results[i].LastTimestamp > results[i + 1].LastTimestamp);
+    }
+
+    // -----------------------------------------------------------------------
+    // 20. GetTrace returns null for an ID that was never ingested
+    // -----------------------------------------------------------------------
+    [Fact]
+    public void GetTrace_UnknownId_ReturnsNull()
+    {
+        var agg = MakeAggregator();
+        Assert.Null(agg.GetTrace("never-seen-id"));
+    }
+
+    // -----------------------------------------------------------------------
+    // 21. GetTraces concurrent with ingest (including eviction) does not throw
+    // -----------------------------------------------------------------------
+    [Fact]
+    public async Task GetTraces_ConcurrentIngest_DoesNotThrow()
+    {
+        // Small maxTraces to force frequent eviction under the lock
+        var agg = MakeAggregator(maxTraces: 5);
+        var ct  = CancellationToken.None;
+
+        using var cts = new CancellationTokenSource();
+
+        // Writer task: ingest many envelopes across many traces as fast as possible
+        var writer = Task.Run(async () =>
+        {
+            for (int i = 0; i < 500 && !cts.Token.IsCancellationRequested; i++)
+            {
+                await agg.IngestAsync(
+                    MakeEnvelope($"conc-h{i}", traceId: $"conc-t{i % 20}"),
+                    CancellationToken.None);
+            }
+        });
+
+        // Reader task: hammer GetTraces and GetTrace while the writer runs
+        var reader = Task.Run(() =>
+        {
+            var ex = (Exception?)null;
+            for (int i = 0; i < 500 && ex is null; i++)
+            {
+                try
+                {
+                    agg.GetTraces(null, null, null, 100);
+                    agg.GetTrace($"conc-t{i % 20}");
+                }
+                catch (Exception e)
+                {
+                    ex = e;
+                }
+            }
+            return ex;
+        });
+
+        await writer;
+        cts.Cancel();
+        var readerException = await reader;
+
+        Assert.Null(readerException);
     }
 }

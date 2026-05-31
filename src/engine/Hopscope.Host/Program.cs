@@ -133,6 +133,18 @@ app.MapGet("/healthz", () => "OK");
 app.MapGet("/snapshot", (IStateAggregator aggregator) =>
     Results.Ok(aggregator.Snapshot()));
 
+// Drill-down: one trace's causal tree (404 if unknown/evicted).
+// Catch-all {*id}: real-broker trace ids embed the vhost "/" (e.g. "rmq-activity:/:orders.dlq:7"),
+// so an id can contain slashes — capture the full remainder. Clients send it raw (unencoded);
+// the colon and other pchars are path-safe, only the slash needs the catch-all.
+app.MapGet("/trace/{*id}", (string id, IStateAggregator aggregator) =>
+    aggregator.GetTrace(id) is { } view ? Results.Ok(view) : Results.NotFound());
+
+// Recent trace summaries for the debugger list (filter: status, source, target)
+app.MapGet("/traces", (IStateAggregator aggregator, string? status, string? source,
+                       string? target, int? limit) =>
+    Results.Ok(aggregator.GetTraces(status, source, target, Math.Clamp(limit ?? 200, 1, 1000))));
+
 // Live push: WebSocket upgrade → snapshot-on-connect, then ordered GraphDelta stream
 app.MapGet("/ws", async (HttpContext ctx,
                          IStateAggregator aggregator,
