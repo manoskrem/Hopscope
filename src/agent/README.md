@@ -1,0 +1,89 @@
+# `hopscope-agent` — the no-code interception agent
+
+`hopscope-agent` taps message flows at the **kernel**, with no change to the target
+application or broker, and streams normalized events to the Hopscope engine over gRPC.
+This first slice captures **Redis (RESP)** traffic.
+
+It is the second half of the no-code seam: the engine already hosts the client-streaming
+`hopscope.v1.Ingestion/Stream` RPC (port `4318`); the agent is the client.
+
+## How it works
+
+```
+tcp_sendmsg (eBPF kprobe, kernel-global)
+   │  bounded prefix of the request + issuing process (comm/pid)
+   ▼
+ring buffer ──► RESP parse (verb + first key ONLY) ──► EventEnvelope ──► gRPC Stream ──► engine
+```
+
+- **Capture** (`internal/bpf`): a CO-RE eBPF kprobe on `tcp_sendmsg` fires for every TCP
+  send on the host kernel — regardless of which container issued it — keeps only sends to the
+  Redis port, and copies a bounded **prefix** of the request bytes plus the issuing process
+  (`bpf_get_current_comm`) into a ring buffer.
+- **Parse** (`internal/resp`): extracts the command verb and the **first key/channel only**.
+- **Map** (`internal/mapper`): builds an `EventEnvelope` shaped exactly like the in-proc Redis
+  provider's (a `Redis` Topic keyed by the key-prefix), but with the real **client process** in
+  `Source` — knowledge the management-API provider never had. Provenance (`capturedBy`,
+  `clientComm`, `pid`) goes in `payloadMetadata`.
+- **Sink** (`internal/sink`): a bounded drop-oldest buffer feeds one long-lived `Ingestion.Stream`,
+  reconnecting with bounded backoff so capture never blocks.
+
+## Metadata only — never message bodies
+
+The RESP parser reads **at most the verb and the first key**; the value (arg2+) is never parsed,
+so it never enters an envelope. `payloadMetadata` carries routing metadata only. This is enforced
+by tests (`internal/resp`, `internal/mapper`) — including an end-to-end assertion that a secret
+value never appears in a serialized envelope.
+
+## Build & run
+
+The agent loads eBPF and therefore needs **Linux with kernel BTF** and **CAP_BPF/CAP_PERFMON**
+(or `--privileged`). It runs **amd64-only** for now — BTF/kprobe are unreliable on Apple-Silicon
+Docker, by design.
+
+```bash
+# Standalone no-code proof stack (engine with NO Redis provider, Redis with keyevents OFF):
+docker compose -f deploy/docker-compose.agent.yml up -d --build --wait
+bash deploy/e2e/agent-redis-check.sh   # Redis hops render from kernel capture alone
+```
+
+Configuration (env): `HOPSCOPE_AGENT_TARGET` (engine gRPC endpoint, default `engine:4318`).
+
+## Layout
+
+```
+cmd/hopscope-agent/   entrypoint: wire capture → mapper → sink
+internal/contracts/v1 committed Go bindings of contracts/proto/event.proto
+internal/bpf/         redis.bpf.c + vmlinux_min.h (CO-RE) + bpf2go loader; Linux-only
+internal/resp/        pure RESP parser (verb + first key); unit-tested
+internal/mapper/      RawEvent → EventEnvelope; mirrors the engine's RedisMapper; unit-tested
+internal/sink/        gRPC client: bounded drop-oldest buffer + reconnect/backoff
+```
+
+## Regenerating generated code
+
+- **Go bindings** (`internal/contracts/v1/*.pb.go`, committed): from the frozen contract —
+  ```bash
+  protoc --proto_path=contracts/proto \
+    --go_out=src/agent      --go_opt=module=github.com/hopscope/agent \
+    --go-grpc_out=src/agent --go-grpc_opt=module=github.com/hopscope/agent \
+    contracts/proto/event.proto
+  ```
+- **eBPF loader** (`internal/bpf/bpf_bpf*.go` + `.o`, gitignored): `go generate ./...` (needs
+  clang + libbpf headers). This runs automatically in the agent's Docker build.
+
+## Tests
+
+```bash
+cd src/agent
+go test ./internal/resp/... ./internal/mapper/... ./internal/sink/...   # pure, no kernel
+```
+
+Kernel/eBPF integration is proven in the nightly `agent-ebpf-e2e` workflow (real kernel + BTF +
+privileged), not per-PR.
+
+## Roadmap
+
+This slice captures Redis commands (status `Success`). Next: recv-side error replies
+(`-ERR` → `Failed` + `ErrorDetails`), then AMQP and Kafka wire sniffers — each proven with that
+broker's in-process provider OFF.

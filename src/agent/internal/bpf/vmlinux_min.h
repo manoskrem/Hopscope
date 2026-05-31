@@ -1,0 +1,90 @@
+/*
+ * Guard name is __VMLINUX_H__ on purpose (not __VMLINUX_MIN_H__): libbpf's bpf_tracing.h
+ * keys off it to select the KERNEL pt_regs register names (di/si/dx) used below, rather
+ * than the userspace ones (rdi/rsi/rdx). A real generated vmlinux.h defines the same guard.
+ */
+#ifndef __VMLINUX_H__
+#define __VMLINUX_H__
+
+/*
+ * Minimal CO-RE type/struct subset for the Redis send-path capture.
+ *
+ * We deliberately do NOT vendor a multi-megabyte vmlinux.h. Only the handful of
+ * fields the kprobe reads are declared, and `preserve_access_index` lets libbpf
+ * relocate their REAL offsets from the running kernel's BTF at load time — so the
+ * field offsets/layout declared here are irrelevant; only the field NAMES must
+ * match the kernel's. (We even declare __ubuf_iovec / __iov / iov as flat siblings
+ * though the kernel keeps them in a union — each name relocates independently.)
+ *
+ * The iov_iter union is the kernel-version-fragile part; see redis.bpf.c.
+ */
+
+/* Kernel integer types that libbpf's generated bpf_helper_defs.h references. A full
+ * vmlinux.h would supply these; we declare the standard set so the helper prototypes parse. */
+typedef signed char            __s8;
+typedef unsigned char          __u8;
+typedef short int              __s16;
+typedef short unsigned int     __u16;
+typedef int                    __s32;
+typedef unsigned int           __u32;
+typedef long long int          __s64;
+typedef long long unsigned int __u64;
+typedef __u16                  __le16;
+typedef __u16                  __be16;
+typedef __u32                  __le32;
+typedef __u32                  __be32;
+typedef __u64                  __le64;
+typedef __u64                  __be64;
+typedef __u16                  __sum16;
+typedef __u32                  __wsum;
+typedef long unsigned int      size_t;
+
+/* Only the one map-type ordinal we use (full enum lives in the UAPI / vmlinux.h). */
+enum bpf_map_type {
+	BPF_MAP_TYPE_RINGBUF = 27,
+};
+
+/*
+ * x86_64 struct pt_regs — the kprobe context. BPF_KPROBE / PT_REGS_PARM1..3 (with
+ * -D__TARGET_ARCH_x86) read function arguments straight out of these register fields
+ * (di, si, dx), so the layout must be the real ABI one. Register offsets are stable,
+ * so this is read directly (kept OUT of the preserve_access_index block below). The
+ * agent runs amd64-only, so the x86 layout is correct everywhere it runs.
+ */
+struct pt_regs {
+	unsigned long r15, r14, r13, r12, bp, bx;
+	unsigned long r11, r10, r9, r8, ax, cx, dx, si, di;
+	unsigned long orig_ax, ip, cs, flags, sp, ss;
+};
+
+#pragma clang attribute push(__attribute__((preserve_access_index)), apply_to = record)
+
+struct sock_common {
+	__be16 skc_dport; /* destination port, network byte order */
+	__u16  skc_num;
+};
+
+struct sock {
+	struct sock_common __sk_common;
+};
+
+struct iovec {
+	void  *iov_base;
+	size_t iov_len;
+};
+
+struct iov_iter {
+	__u8   iter_type;          /* ITER_UBUF / ITER_IOVEC / ... */
+	size_t count;             /* bytes remaining (single-segment ⇒ the send length) */
+	struct iovec __ubuf_iovec; /* ITER_UBUF single buffer (kernels >= 6.4)           */
+	const struct iovec *__iov; /* ITER_IOVEC array, current field name (>= 6.4)      */
+	const struct iovec *iov;   /* ITER_IOVEC array, legacy field name (< 6.4)        */
+};
+
+struct msghdr {
+	struct iov_iter msg_iter;
+};
+
+#pragma clang attribute pop
+
+#endif /* __VMLINUX_H__ */

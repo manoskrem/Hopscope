@@ -45,6 +45,25 @@ jobs:
             exit 1
           fi
 
+  # Pure, deterministic unit tests for the Go agent's privacy-critical logic — the RESP
+  # parser (which must never surface a value) and the envelope mapper. No kernel/eBPF here
+  # (that's the nightly agent-ebpf-e2e job), so this runs fast on any runner. Keep it OFF the
+  # required-checks list while the agent is young; promote it once it stabilises.
+  go-unit:
+    name: go-unit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: src/agent/go.mod
+          cache-dependency-path: src/agent/go.sum
+      - name: Unit tests (resp + mapper + sink — no kernel)
+        run: go test ./internal/resp/... ./internal/mapper/... ./internal/sink/...
+
   ui:
     name: ui
     runs-on: ubuntu-latest
