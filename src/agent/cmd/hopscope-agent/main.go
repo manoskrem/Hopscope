@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -29,6 +30,14 @@ func main() {
 
 	capt, err := bpf.NewCapture()
 	if err != nil {
+		if errors.Is(err, bpf.ErrNoKernelBTF) {
+			log.Error("agent: this kernel has no BTF, so the eBPF capture cannot load. Use a broker "+
+				"provider (RabbitMQ/Redis/Kafka) or OTLP instead — both are kernel-free and need no "+
+				"agent — or run the agent on a BTF-enabled kernel (most modern Linux servers and "+
+				"managed Kubernetes nodes qualify; check: ls /sys/kernel/btf/vmlinux). See README.",
+				"err", err)
+			os.Exit(2)
+		}
 		log.Error("agent: failed to start eBPF capture (needs privileged + kernel BTF)", "err", err)
 		os.Exit(1)
 	}

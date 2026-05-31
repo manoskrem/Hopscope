@@ -7,12 +7,14 @@
 //
 // Redis send-path capture (Phase-5 no-code agent, first slice).
 //
-// A kprobe on tcp_sendmsg fires for EVERY TCP send on the host kernel — regardless
+// An fentry hook on tcp_sendmsg fires for EVERY TCP send on the host kernel — regardless
 // of which container or namespace issued it — so the agent observes a target's Redis
-// commands with no change to the target. We keep only sends to the Redis port, copy a
-// bounded PREFIX of the request bytes plus the issuing process (comm/pid) into a ring
-// buffer, and let user space parse the RESP command + first key. The value (arg2+) is
-// never parsed there, so it never leaves the host.
+// commands with no change to the target. fentry (over a plain kprobe) gives typed args
+// straight from BTF, so there is no pt_regs / __TARGET_ARCH dependency and ONE bytecode
+// loads on every little-endian arch (amd64 runner + arm64 dev kernels alike). We keep only
+// sends to the Redis port, copy a bounded PREFIX of the request bytes plus the issuing
+// process (comm/pid) into a ring buffer, and let user space parse the RESP command + first
+// key. The value (arg2+) is never parsed there, so it never leaves the host.
 
 #include "vmlinux_min.h"
 #include <bpf/bpf_helpers.h>
@@ -45,8 +47,8 @@ struct {
 	__uint(max_entries, 1 << 20); // 1 MiB
 } events SEC(".maps");
 
-SEC("kprobe/tcp_sendmsg")
-int BPF_KPROBE(redis_tcp_sendmsg, struct sock *sk, struct msghdr *msg, __u64 size)
+SEC("fentry/tcp_sendmsg")
+int BPF_PROG(redis_tcp_sendmsg, struct sock *sk, struct msghdr *msg)
 {
 	__u16 dport = bpf_ntohs(BPF_CORE_READ(sk, __sk_common.skc_dport));
 	if (dport != REDIS_PORT)

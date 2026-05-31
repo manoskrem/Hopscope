@@ -9,10 +9,17 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/btf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
 )
+
+// ErrNoKernelBTF means the running kernel exposes no BTF, so the CO-RE/fentry program cannot
+// load. It is actionable: callers should fall back to a broker provider or OTLP (both kernel-free)
+// or run on a BTF-enabled kernel. Checked via errors.Is by the entrypoint.
+var ErrNoKernelBTF = errors.New("kernel BTF unavailable (no /sys/kernel/btf/vmlinux)")
 
 // Event is one captured Redis send: the issuing process and the bounded request
 // prefix. Data is a private copy (the ring-buffer sample is reused after Read).
@@ -22,7 +29,7 @@ type Event struct {
 	Data []byte
 }
 
-// Capture loads the eBPF program, attaches the tcp_sendmsg kprobe, and streams
+// Capture loads the eBPF program, attaches the tcp_sendmsg fentry hook, and streams
 // decoded Events. It requires CAP_BPF/CAP_PERFMON (or privileged) and kernel BTF.
 type Capture struct {
 	objs   bpfObjects
@@ -36,25 +43,35 @@ func NewCapture() (*Capture, error) {
 		return nil, fmt.Errorf("remove memlock rlimit: %w", err)
 	}
 
+	// Preflight: CO-RE relocations AND the fentry attach both require the running kernel's BTF.
+	// Probe it up front so a BTF-less kernel (some WSL2 builds, older/locked-down distros) yields
+	// an actionable error instead of a raw relocation/verifier failure deeper in the load.
+	if _, err := btf.LoadKernelSpec(); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrNoKernelBTF, err)
+	}
+
 	var objs bpfObjects
 	if err := loadBpfObjects(&objs, nil); err != nil {
 		return nil, fmt.Errorf("load bpf objects (need kernel BTF at /sys/kernel/btf): %w", err)
 	}
 
-	kp, err := link.Kprobe("tcp_sendmsg", objs.RedisTcpSendmsg, nil)
+	lk, err := link.AttachTracing(link.TracingOptions{
+		Program:    objs.RedisTcpSendmsg,
+		AttachType: ebpf.AttachTraceFEntry,
+	})
 	if err != nil {
 		objs.Close()
-		return nil, fmt.Errorf("attach kprobe tcp_sendmsg: %w", err)
+		return nil, fmt.Errorf("attach fentry tcp_sendmsg: %w", err)
 	}
 
 	rd, err := ringbuf.NewReader(objs.Events)
 	if err != nil {
-		kp.Close()
+		lk.Close()
 		objs.Close()
 		return nil, fmt.Errorf("open ring buffer: %w", err)
 	}
 
-	return &Capture{objs: objs, link: kp, reader: rd}, nil
+	return &Capture{objs: objs, link: lk, reader: rd}, nil
 }
 
 // Run reads events until ctx is cancelled, invoking handle for each decoded Event.

@@ -1,8 +1,5 @@
-/*
- * Guard name is __VMLINUX_H__ on purpose (not __VMLINUX_MIN_H__): libbpf's bpf_tracing.h
- * keys off it to select the KERNEL pt_regs register names (di/si/dx) used below, rather
- * than the userspace ones (rdi/rsi/rdx). A real generated vmlinux.h defines the same guard.
- */
+/* Guard name is __VMLINUX_H__ by convention (a real generated vmlinux.h uses the same),
+ * which keeps libbpf's headers on their "vmlinux is present" path. */
 #ifndef __VMLINUX_H__
 #define __VMLINUX_H__
 
@@ -42,19 +39,6 @@ typedef long unsigned int      size_t;
 /* Only the one map-type ordinal we use (full enum lives in the UAPI / vmlinux.h). */
 enum bpf_map_type {
 	BPF_MAP_TYPE_RINGBUF = 27,
-};
-
-/*
- * x86_64 struct pt_regs — the kprobe context. BPF_KPROBE / PT_REGS_PARM1..3 (with
- * -D__TARGET_ARCH_x86) read function arguments straight out of these register fields
- * (di, si, dx), so the layout must be the real ABI one. Register offsets are stable,
- * so this is read directly (kept OUT of the preserve_access_index block below). The
- * agent runs amd64-only, so the x86 layout is correct everywhere it runs.
- */
-struct pt_regs {
-	unsigned long r15, r14, r13, r12, bp, bx;
-	unsigned long r11, r10, r9, r8, ax, cx, dx, si, di;
-	unsigned long orig_ax, ip, cs, flags, sp, ss;
 };
 
 #pragma clang attribute push(__attribute__((preserve_access_index)), apply_to = record)

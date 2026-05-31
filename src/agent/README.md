@@ -10,16 +10,17 @@ It is the second half of the no-code seam: the engine already hosts the client-s
 ## How it works
 
 ```
-tcp_sendmsg (eBPF kprobe, kernel-global)
+tcp_sendmsg (eBPF fentry, kernel-global)
    │  bounded prefix of the request + issuing process (comm/pid)
    ▼
 ring buffer ──► RESP parse (verb + first key ONLY) ──► EventEnvelope ──► gRPC Stream ──► engine
 ```
 
-- **Capture** (`internal/bpf`): a CO-RE eBPF kprobe on `tcp_sendmsg` fires for every TCP
-  send on the host kernel — regardless of which container issued it — keeps only sends to the
+- **Capture** (`internal/bpf`): a CO-RE eBPF **fentry** hook on `tcp_sendmsg` fires for every
+  TCP send on the host kernel — regardless of which container issued it — keeps only sends to the
   Redis port, and copies a bounded **prefix** of the request bytes plus the issuing process
-  (`bpf_get_current_comm`) into a ring buffer.
+  (`bpf_get_current_comm`) into a ring buffer. fentry gives typed args from BTF, so one bytecode
+  loads on any little-endian arch (amd64 + arm64).
 - **Parse** (`internal/resp`): extracts the command verb and the **first key/channel only**.
 - **Map** (`internal/mapper`): builds an `EventEnvelope` shaped exactly like the in-proc Redis
   provider's (a `Redis` Topic keyed by the key-prefix), but with the real **client process** in
@@ -35,11 +36,41 @@ so it never enters an envelope. `payloadMetadata` carries routing metadata only.
 by tests (`internal/resp`, `internal/mapper`) — including an end-to-end assertion that a secret
 value never appears in a serialized envelope.
 
+## Platform support & when to use the agent
+
+The agent is **one** of Hopscope's ingestion paths, and the only one that touches the kernel.
+Pick the path that fits where you're running:
+
+| Path | Kernel requirement | Runs on |
+|---|---|---|
+| **Broker providers** (RabbitMQ / Redis / Kafka) | none (userspace) | any OS, any laptop — Windows/WSL2 included |
+| **OTLP receiver** (services push traces) | none (userspace) | any OS, any laptop |
+| **eBPF agent** (this) — no instrumentation | **kernel BTF** | Linux with BTF: modern servers, managed Kubernetes nodes, Linux dev hosts, Docker Desktop for Mac |
+
+The agent is the *no-instrumentation* option for Linux/cluster environments where you can't or
+won't touch the target services. If you're developing locally on a kernel without BTF (some
+**Windows/WSL2** setups, older/locked-down distros), use a **broker provider** or **OTLP** instead —
+same canvas, zero kernel requirement — and run the agent in your cluster/CI.
+
+**Containers share the host kernel — the agent image cannot carry its own.** eBPF loads into the
+Docker VM's kernel, so what matters is whether *that* kernel has BTF, not the image. Check any host:
+
+```bash
+ls -l /sys/kernel/btf/vmlinux            # on a Linux host
+# or through Docker (Mac/Windows), which checks the Docker VM's kernel:
+docker run --rm --privileged -v /sys/kernel/btf:/sys/kernel/btf:ro alpine ls /sys/kernel/btf/vmlinux
+```
+
+If that file exists the agent runs; if not, it exits at startup pointing you to the provider/OTLP
+paths (never silently). BTF has been default-on in mainline since ~5.2 and in major distros since
+~2020, so modern server/cluster targets almost always qualify.
+
 ## Build & run
 
 The agent loads eBPF and therefore needs **Linux with kernel BTF** and **CAP_BPF/CAP_PERFMON**
-(or `--privileged`). It runs **amd64-only** for now — BTF/kprobe are unreliable on Apple-Silicon
-Docker, by design.
+(or `--privileged`). Thanks to fentry it is **arch-portable** — it runs on any little-endian
+kernel with BTF, including **Docker Desktop on Apple Silicon** (whose LinuxKit kernel ships BTF)
+and the amd64 CI runner.
 
 ```bash
 # Standalone no-code proof stack (engine with NO Redis provider, Redis with keyevents OFF):

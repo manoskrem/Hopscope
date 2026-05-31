@@ -8,8 +8,8 @@
 #   docker compose -f deploy/docker-compose.agent.yml up -d --build --wait
 #   bash deploy/e2e/agent-redis-check.sh
 #
-# Requires a real Linux kernel with BTF + privileged Docker (the GitHub ubuntu-latest
-# runner; NOT the Apple-Silicon dev Docker — BTF/kprobe are unreliable there, by design).
+# Requires a Linux kernel with BTF + privileged Docker. fentry makes the agent arch-portable,
+# so this runs on the amd64 CI runner AND on Docker Desktop for Mac (its LinuxKit kernel has BTF).
 services:
   redis:
     image: redis:7-alpine
@@ -46,7 +46,7 @@ services:
       context: ..
       dockerfile: src/agent/Dockerfile
     container_name: hopscope-agent
-    # eBPF kprobe load needs privileges + kernel BTF. The kprobe is kernel-global, so the
+    # eBPF fentry load needs privileges + kernel BTF. The hook is kernel-global, so the
     # agent captures redis-cli's commands even though redis-cli runs in a different container.
     # No host networking needed (capture is global); on the bridge net the agent resolves engine:4318.
     privileged: true
