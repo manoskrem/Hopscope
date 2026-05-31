@@ -76,3 +76,36 @@ jobs:
       - name: Tear down
         if: always()
         run: docker compose down -v || true
+
+  # The decisive no-code proof: a REAL eBPF agent captures Redis traffic at the kernel and the
+  # hops render on the canvas with the target NOT cooperating (Redis provider OFF, keyevents OFF).
+  # This needs a real kernel + BTF + privileged Docker, which the ubuntu-latest runner provides, so
+  # it lives here (nightly, non-required) rather than in ci.yml. Its own standalone stack +
+  # COMPOSE_PROJECT_NAME keeps it isolated from broker-e2e above (which runs the Redis provider ON).
+  agent-ebpf-e2e:
+    name: agent-ebpf-e2e
+    runs-on: ubuntu-latest        # amd64, real x86 kernel + /sys/kernel/btf + privileged Docker
+    timeout-minutes: 30
+    env:
+      COMPOSE_PROJECT_NAME: deployagent
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Kernel / BTF probe
+        run: |
+          uname -r
+          if [ -f /sys/kernel/btf/vmlinux ]; then echo "BTF present"; else echo "::warning::no /sys/kernel/btf/vmlinux"; fi
+
+      - name: Bring up the standalone agent stack (engine + redis + privileged eBPF agent)
+        run: docker compose -f deploy/docker-compose.agent.yml up -d --build --wait --wait-timeout 300
+
+      - name: Run the no-code agent check (Redis hops from kernel capture alone)
+        run: bash deploy/e2e/agent-redis-check.sh
+
+      - name: Agent + engine logs on failure
+        if: failure()
+        run: docker compose -f deploy/docker-compose.agent.yml logs --no-color agent engine || true
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f deploy/docker-compose.agent.yml down -v || true
