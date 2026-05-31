@@ -1,8 +1,9 @@
 name: Nightly broker E2E
 
 # Continuous real-broker integration coverage: stand up the full compose stack (engine + ui +
-# RabbitMQ + Redis + Kafka, OTLP enabled) and run the four real-broker E2E checks, so the
-# multi-broker co-render and the DeadLettered / Failed paths stay verified against real brokers.
+# RabbitMQ + Redis + Kafka, OTLP + agent receiver enabled) and run the real-broker E2E checks, so
+# the multi-broker co-render and the DeadLettered / Failed paths stay verified against real
+# brokers. The agent check exercises the Phase-5 gRPC ingestion seam via grpcurl (no eBPF yet).
 #
 # This is a SEPARATE workflow from ci.yml and is NOT a required status check — it never gates a
 # PR merge. It runs nightly on a schedule and on manual dispatch.
@@ -45,14 +46,14 @@ jobs:
           done
           echo "::error::engine /healthz never came up"; exit 1
 
-      # Run all four checks (do NOT fail-fast) so one red doesn't hide the others, then fail
-      # the job if any failed. jq is preinstalled on ubuntu-latest; otlp-check.sh pulls the
-      # grpcurl image and crafts a deterministic OTLP error trace (no telemetrygen dependency).
-      - name: Run broker E2E checks (dlq, redis, kafka, otlp)
+      # Run all checks (do NOT fail-fast) so one red doesn't hide the others, then fail the job
+      # if any failed. jq is preinstalled on ubuntu-latest; otlp-check.sh and agent-check.sh pull
+      # the grpcurl image and craft deterministic traces (no telemetrygen dependency).
+      - name: Run broker E2E checks (dlq, redis, kafka, otlp, agent)
         run: |
           set -u
           fails=()
-          for c in dlq redis kafka otlp; do
+          for c in dlq redis kafka otlp agent; do
             echo "::group::${c}-check"
             if bash "deploy/e2e/${c}-check.sh"; then
               echo "✓ ${c}-check passed"
@@ -66,7 +67,7 @@ jobs:
             echo "::error::failed checks: ${fails[*]}"
             exit 1
           fi
-          echo "all four broker E2E checks passed"
+          echo "all broker E2E checks passed"
 
       - name: Engine logs on failure
         if: failure()
