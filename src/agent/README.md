@@ -36,6 +36,35 @@ so it never enters an envelope. `payloadMetadata` carries routing metadata only.
 by tests (`internal/resp`, `internal/mapper`) — including an end-to-end assertion that a secret
 value never appears in a serialized envelope.
 
+## Platform support & when to use the agent
+
+The agent is **one** of Hopscope's ingestion paths, and the only one that touches the kernel.
+Pick the path that fits where you're running:
+
+| Path | Kernel requirement | Runs on |
+|---|---|---|
+| **Broker providers** (RabbitMQ / Redis / Kafka) | none (userspace) | any OS, any laptop — Windows/WSL2 included |
+| **OTLP receiver** (services push traces) | none (userspace) | any OS, any laptop |
+| **eBPF agent** (this) — no instrumentation | **kernel BTF** | Linux with BTF: modern servers, managed Kubernetes nodes, Linux dev hosts, Docker Desktop for Mac |
+
+The agent is the *no-instrumentation* option for Linux/cluster environments where you can't or
+won't touch the target services. If you're developing locally on a kernel without BTF (some
+**Windows/WSL2** setups, older/locked-down distros), use a **broker provider** or **OTLP** instead —
+same canvas, zero kernel requirement — and run the agent in your cluster/CI.
+
+**Containers share the host kernel — the agent image cannot carry its own.** eBPF loads into the
+Docker VM's kernel, so what matters is whether *that* kernel has BTF, not the image. Check any host:
+
+```bash
+ls -l /sys/kernel/btf/vmlinux            # on a Linux host
+# or through Docker (Mac/Windows), which checks the Docker VM's kernel:
+docker run --rm --privileged -v /sys/kernel/btf:/sys/kernel/btf:ro alpine ls /sys/kernel/btf/vmlinux
+```
+
+If that file exists the agent runs; if not, it exits at startup pointing you to the provider/OTLP
+paths (never silently). BTF has been default-on in mainline since ~5.2 and in major distros since
+~2020, so modern server/cluster targets almost always qualify.
+
 ## Build & run
 
 The agent loads eBPF and therefore needs **Linux with kernel BTF** and **CAP_BPF/CAP_PERFMON**

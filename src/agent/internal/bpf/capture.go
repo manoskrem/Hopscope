@@ -10,10 +10,16 @@ import (
 	"fmt"
 
 	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/btf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
 )
+
+// ErrNoKernelBTF means the running kernel exposes no BTF, so the CO-RE/fentry program cannot
+// load. It is actionable: callers should fall back to a broker provider or OTLP (both kernel-free)
+// or run on a BTF-enabled kernel. Checked via errors.Is by the entrypoint.
+var ErrNoKernelBTF = errors.New("kernel BTF unavailable (no /sys/kernel/btf/vmlinux)")
 
 // Event is one captured Redis send: the issuing process and the bounded request
 // prefix. Data is a private copy (the ring-buffer sample is reused after Read).
@@ -35,6 +41,13 @@ type Capture struct {
 func NewCapture() (*Capture, error) {
 	if err := rlimit.RemoveMemlock(); err != nil {
 		return nil, fmt.Errorf("remove memlock rlimit: %w", err)
+	}
+
+	// Preflight: CO-RE relocations AND the fentry attach both require the running kernel's BTF.
+	// Probe it up front so a BTF-less kernel (some WSL2 builds, older/locked-down distros) yields
+	// an actionable error instead of a raw relocation/verifier failure deeper in the load.
+	if _, err := btf.LoadKernelSpec(); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrNoKernelBTF, err)
 	}
 
 	var objs bpfObjects
